@@ -12,45 +12,71 @@ I<Does that mean it's more powerful?  ...Is it more powerful?>
 
 I<Well, it's one layer of abstraction higher, isn't it?  It's not C<m4>.  You see, most
 blokes gonna be templating with C<cpp> or C<m4>, you're on C<m4> here all the way up,
-all the way up, Where can you go from there? Where?  Nowhere!  Exactly.>
+all the way up, Where can you go from there? Where?>
+
+I<Nowhere!  Exactly.>
 
 I<What we do is if we need that extra, push, over the cliff, you know what we do?>
 
-I<C<perl>, exactly. These go to C<perl>.>
+I<C<perl>, exactly.>
+
+I<These go to C<perl>.>
+
+B<Input:>
 
   #! /usr/bin/env cpppp
   ## for (my $bits= 8; $bits <= 32; $bits <<= 1) {
   struct tree_node_$bits {
-    uint${bits}_t left:  ${{$bits-1}},
-                  color: 1,
-                  right: ${{$bits-1}};
-  }
+    uint${bits}_t  left:  ${{$bits-1}},
+                   color: 1,
+                   right: ${{$bits-1}};
+  };
   ## }
 
-Output:
+B<Output:>
 
   struct tree_node_8 {
     uint8_t left:  7,
             right: 7,
             color: 1;
-  }
+  };
   struct tree_node_16 {
     uint16_t left:  15,
              right: 15,
              color: 1;
-  }
+  };
   struct tree_node_32 {
     uint32_t left:  31,
              right: 31,
              color: 1;
-  }
+  };
 
 =head1 DESCRIPTION
 
 B<WARNING: this API is complete and totally unstable>.
 
+This module is a preprocessor for C, 
+
 If you have an interest in this, contact me, because I could use help brainstorming ideas
 about how to accommodate the most possibilities, here.
+
+Possibilities:
+
+=over
+
+=item *
+
+Scan existing headers to discover available macros, structs, and functions on the host.
+
+=item *
+
+Pass a list of headers through the real cpp and analyze the macro output.
+
+=item *
+
+Shell out to a compiler to find 'sizeof' information for structs.
+
+=cut
 
 =head1 CONSTRUCTOR
 
@@ -90,8 +116,6 @@ sub compile_template {
    }
    return $self;
 }
-
-=head1 METHODS
 
 =head2 render
 
@@ -329,10 +353,8 @@ sub _render_code_block {
          my $oldcol= $group->[$i] - $linestart;
          my $diff= $newcol - $oldcol;
          if ($diff < 0) {
-            print "subtract $diff characters at $linestart+$newcol\n";
             substr($text, $linestart + $newcol, -$diff, '');
          } elsif($diff > 0) {
-            print "insert $diff spaces at $linestart+$oldcol\n";
             substr($text, $linestart + $oldcol, 0, ' 'x$diff);
          }
          # update all positions beyond this one

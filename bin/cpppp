@@ -1,7 +1,28 @@
 #! /usr/bin/env perl
+# VERSION
+# PODNAME: cpppp
 use strict;
 use warnings;
 use CodeGen::Cpppp;
+use autouse 'Pod::Usage' => 'pod2usage';
+use Getopt::Long;
+
+=head1 USAGE
+
+Transform perl+C source into C
+
+  cpppp [OPTIONS] < file.cp > file.c
+
+=head1 OPTIONS
+
+None yet!  but eventually will support many that C<cpp> has, for defining things and parsing
+headers to discover existing types.
+
+=cut
+
+GetOptions(
+   '--help' => sub { pod2usage(1) },
+) or pod2usage(2);
 
 if (@ARGV) {
    for (@ARGV) {
@@ -9,5 +30,5 @@ if (@ARGV) {
       print CodeGen::Cpppp->new()->compile_template($fh, $_)->render;
    }
 } else {
-   CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->render;
+   print CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->render;
 }

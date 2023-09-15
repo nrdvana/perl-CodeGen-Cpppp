@@ -1,3 +1,9 @@
+0.001_02 - 2023-09-15
+  - Fix various glaring documentation mistakes
+  - List some ideas for future features
+  - Remove debugging output
+  - "--help" for command line
+
 0.001_01 - 2023-09-15
   - Basic intermingling of perl variables in C code
   - Arbitrary perl in '##' directives
