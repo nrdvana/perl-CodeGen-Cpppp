@@ -1,0 +1,13 @@
+#! /usr/bin/env perl
+use strict;
+use warnings;
+use CodeGen::Cpppp;
+
+if (@ARGV) {
+   for (@ARGV) {
+      open my $fh, '<:utf8', $_ or die "open($_): $!";
+      print CodeGen::Cpppp->new()->compile_template($fh, $_)->render;
+   }
+} else {
+   CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->render;
+}

@@ -1,0 +1,4 @@
+0.001_01 - 2023-09-15
+  - Basic intermingling of perl variables in C code
+  - Arbitrary perl in '##' directives
+  - Magic indent adjustment after variable substitution
