@@ -6,7 +6,7 @@ use Data::Printer;
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
-   {  name => "just perl",
+   {  name => "loop, tpl, indent",
       code => <<~'C' , file => __FILE__, line => __LINE__,
       ## for (my $bits= 8; $bits <= 32; $bits <<= 1) {
       struct tree_node_$bits {
@@ -34,10 +34,29 @@ my @tests= (
       };
       C
    },
+   {  name => 'trim_comma',
+      code => <<~'C' , file => __FILE__, line => __LINE__,
+      ## my @x= qw( a b c d e f );
+      ## local $"= ',';
+      ## my $y= '';
+      void fn(@x,$y $trim_comma)
+      C
+      expect => "void fn(a,b,c,d,e,f )\n",
+   },
+   {  name => "user function",
+      code => <<~'C' , file => __FILE__, line => __LINE__,
+      ## my $y= 2;
+      ## sub example($x) {
+      ##   $x*$x/$y
+      ## }
+      got ${{example(8)}}
+      C
+      expect => "got 32\n",
+   },
 );
 
 for my $t (@tests) {
-   my $c= $cpppp->compile_template(\$t->{code}, $t->{file}, $t->{line}+1)->render;
+   my $c= $cpppp->compile_template(\$t->{code}, $t->{file}, $t->{line}+1)->new->render;
    is( $c, $t->{expect}, $t->{name} )
       or diag &np([$c]);
 }

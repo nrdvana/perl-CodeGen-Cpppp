@@ -26,9 +26,7 @@ my @tests= (
       };
       C
       expect => <<~'pl' ,
-      $self->_render_code_block(do { my @expr_subs;
-      ($self->{code_block_templates}[0], \@expr_subs)
-      });
+      $self->_render_code_block(0);
       pl
    },
    {  name => 'C in a perl loop',
@@ -38,31 +36,26 @@ my @tests= (
       ## }
       C
       expect => <<~'pl',
-      # line 36 "t/20-translate-cpppp.t"
+      # line 34 "t/20-translate-cpppp.t"
       for (3..4) {
-      $self->_render_code_block(do { my @expr_subs;
-      $expr_subs[0]= sub { my $self= shift;
-      # line 37 "t/20-translate-cpppp.t"
-      $_
-      };
-      $expr_subs[1]= sub { my $self= shift;
-      # line 37 "t/20-translate-cpppp.t"
-      $_
-      };
-      ($self->{code_block_templates}[1], \@expr_subs)
-      });
-      # line 38 "t/20-translate-cpppp.t"
+         $self->_render_code_block(0,
+      # line 35 "t/20-translate-cpppp.t"
+            sub{ $_ },
+      # line 35 "t/20-translate-cpppp.t"
+            sub{ $_ });
+      # line 36 "t/20-translate-cpppp.t"
       }
       pl
    },
 );
 
 for my $t (@tests) {
-   my $pl= $cpppp->_translate_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $parse= $cpppp->_parse_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
    # remove leading whitespace, so that changes in formatting of the code don't break tests
-   $pl =~ s/^\s+//mg;
-   is( $pl, $t->{expect}, $t->{name} )
-      or diag &np([$pl]);
+   $parse->{code} =~ s/^\s+//mg;
+   $t->{expect} =~ s/^\s+//mg;
+   is( $parse->{code}, $t->{expect}, $t->{name} )
+      or diag &np($parse);
 }
 
 done_testing;

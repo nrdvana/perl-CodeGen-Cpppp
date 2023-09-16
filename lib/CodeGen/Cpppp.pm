@@ -1,5 +1,5 @@
 package CodeGen::Cpppp;
-use strict;
+use v5.20;
 use warnings;
 use Carp;
 
@@ -53,7 +53,7 @@ B<Output:>
 
 =head1 DESCRIPTION
 
-B<WARNING: this API is complete and totally unstable>.
+B<WARNING: this API is completely and totally unstable>.
 
 This module is a preprocessor for C, 
 
@@ -76,7 +76,7 @@ Pass a list of headers through the real cpp and analyze the macro output.
 
 Shell out to a compiler to find 'sizeof' information for structs.
 
-=cut
+=back
 
 =head1 CONSTRUCTOR
 
@@ -86,7 +86,6 @@ Bare-bones for now, it accepts whatever hash values you hand to it.
 
 sub new {
    my ($class, %attrs)= @_;
-   $attrs{code_block_templates}= [];
    bless \%attrs, $class;
 }
 
@@ -97,42 +96,36 @@ sub new {
   $cpppp->compile_template($input_fh, $filename);
   $cpppp->compile_template(\$scalar_tpl, $filename, $line_offset);
 
-This reads the input file handle (or scalar-ref) and builds a perl subroutine out of it, then
-evals that subroutine so it is ready to run (and spits out any compile errors in the template).
+This reads the input file handle (or scalar-ref) and builds a new perl template
+class out of it (and dies if there are syntax errors in the template).
 
 =cut
 
+our $next_pkg= 1;
 sub compile_template {
    my ($self, $in, $filename, $line)= @_;
-   my $perl= $self->_translate_cpppp($in, $filename, $line);
-   $perl= "package CodeGen::Cpppp::Tmp::0;\n"
-      ."use strict; use warnings;\n"
-      ."sub { my \$self= shift;\n"
-      ."$perl;\n"
-      ."}\n";
-   unless ($self->{fn}= eval $perl) {
-      print $perl;
-      die $@;
+   my $parse= $self->_parse_cpppp($in, $filename, $line);
+   my $pkg= 'CodeGen::Cpppp::_Template'.$next_pkg++;
+   my $perl= "package $pkg;\n"
+      ."use v5.20;\n"
+      ."use warnings;\n"
+      ."no warnings 'experimental::lexical_subs', 'experimental::signatures';\n"
+      ."use feature 'lexical_subs', 'signatures';\n"
+      ."use CodeGen::Cpppp::Template -setup;\n"
+      ."sub process(\$self) {\n"
+      ."$parse->{code};\n"
+      ."}\n"
+      ."1\n";
+   unless (eval $perl) {
+      my $err= "$@";
+      STDERR->print($perl);
+      die $err;
    }
-   return $self;
+   $pkg->_set_parse_data($parse);
+   return $pkg;
 }
 
-=head2 render
-
-  $cpppp->render();
-
-Execute the template previously compiled.  Passing arguments to this template is a TODO item.
-
-=cut
-
-sub render {
-   my $self= shift;
-   $self->{out}= '';
-   $self->{fn}->($self);
-   return $self->{out};
-}
-
-sub _translate_cpppp {
+sub _parse_cpppp {
    my ($self, $in, $filename, $line)= @_;
    my $line_ofs= $line? $line - 1 : 0;
    if (ref $in eq 'SCALAR') {
@@ -142,10 +135,13 @@ sub _translate_cpppp {
       open($in, '<', $tmp) or die;
       defined $in or die;
    }
+   $self->{cpppp_parse}= {};
    my ($perl, $tpl_start_line, $cur_tpl);
    my $end_tpl= sub {
-      my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
-      $perl .= '$self->_render_code_block('.$self->_generate_code_block_perl($parsed).");\n";
+      if ($cur_tpl =~ /\S/) {
+         my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
+         $perl .= $self->_gen_perl_call_code_block($parsed);
+      }
       $cur_tpl= undef;
    };
    while (<$in>) {
@@ -156,17 +152,12 @@ sub _translate_cpppp {
             &$end_tpl;
             $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
-         if (!defined $perl) {
+         elsif (!defined $perl) {
             $perl= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
-         s/^##\s*//;
+         s/^##\s?//;
          my $pl= $_;
-         if ($pl =~ /sub \w+ \s* \( ( [^,)\n]* )/x) {
-            if ($1 ne '$self') {
-               substr($pl, $-[1], $+[1]-$-[1], '$self'.(length $1? ', '.$1 : ''));
-            }
-         }
-         $perl .= $pl;
+         $perl .= $self->_process_template_perl($pl);
       }
       elsif (/^(.*?) ## ?((?:if|unless) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
@@ -187,36 +178,44 @@ sub _translate_cpppp {
       }
    }
    &$end_tpl if defined $cur_tpl;
-   $perl;
+   $self->{cpppp_parse}{code}= $perl;
+   delete $self->{cpppp_parse};
 }
 
-sub _generate_code_block_perl {
-   my ($self, $parsed)= @_;
-   my $n= @{$self->{code_block_templates}};
-   push @{$self->{code_block_templates}}, $parsed;
-   my $code= 'do { my @expr_subs;'."\n";
-   for (0 .. $#{$parsed->{subst}}) {
-      my $s= $parsed->{subst}[$_];
-      if ($s->{len}) {
-         my $expr= substr($parsed->{text}, $s->{pos}, $s->{len});
-         if ($expr eq '$anticomma') {
-            # Special case: trim out the previous comma, skipping over whitespace
-            $s->{fn}= sub { ${$_[1]} =~ s/,(\s*)/$1/; '' };
-         }
-         else {
-            # Notation ${{ ... }} is an extension that means "run this literal perl"
-            if ($expr =~ /\$\{\{(.*)\}\}$/) {
-               $expr= $1;
-            }
-            $code .= join "\n",
-               '    $expr_subs['.$_.']= sub { my $self= shift;',
-               '# line '.$s->{line}.' "'.$parsed->{file}.'"',
-               '      '.$expr,
-               "    };\n";
-         }
+sub _process_template_perl {
+   my ($self, $pl)= @_;
+   # If user declares "sub NAME(", convert that to "my sub NAME" so that we
+   # can grab a ref to it later.
+   if ($pl =~ /\b sub \s* (\w+) \s* \(/x) {
+      push @{$self->{cpppp_parse}{named_subs}}, $1;
+      # look backward and see if it already started with 'my'
+      my $pos= rindex($pl, "my", $-[0]);
+      if ($pos == -1) {
+         substr($pl, $-[0], 0, 'my ');
       }
    }
-   return $code.'($self->{code_block_templates}['.$n."], \\\@expr_subs)\n}";
+   # If user declares "##define name(", convert that to both a method and a define
+   if ($pl =~ /\b define \s* (\w+) (\s*) \(/x) {
+      push @{$self->{cpppp_parse}{named_subs}}, $1;
+      substr($pl, $-[2], $+[2]-$-[2], '=> \$self->{define}{'.$1.'}; my sub '.$1);
+   }
+   $pl;
+}
+
+sub _gen_perl_call_code_block {
+   my ($self, $parsed)= @_;
+   my $codeblocks= $self->{cpppp_parse}{code_block_templates} ||= [];
+   push @$codeblocks, $parsed;
+   my $code= '$self->_render_code_block('.$#$codeblocks;
+   my $i= 0;
+   for my $s (@{$parsed->{subst}}) {
+      if (defined $s->{eval}) {
+         $s->{eval_idx}= $i++;
+         my $sig= $s->{eval} =~ /self|output/? '($self, $output)' : '';
+         $code .= qq{,\n# line $s->{line} "$parsed->{file}"\n  sub${sig}{ $s->{eval} }};
+      }
+   }
+   $code .");\n";
 }
 
 sub _parse_code_block {
@@ -254,6 +253,21 @@ sub _parse_code_block {
           })
       | \n     (?{ $line++ })
    }xg;
+   
+   for (0..$#subst) {
+      my $s= $subst[$_];
+      # Special cases
+      my $expr= substr($text, $s->{pos}, $s->{len});
+      if ($expr eq '$trim_comma') {
+         # Modify the text being created to remove the final comma
+         $s->{fn}= sub { ${$_[1]} =~ s/,(\s*)$/$1/; '' };
+      } elsif ($expr =~ /^ \$\{\{ (.*) \}\} $/x) {
+         # Notation ${{ ... }} is a shortcut for @{[do{ ... }]}
+         $s->{eval}= $1;
+      } else {
+         $s->{eval}= $expr; # Will need to be filled in with a coderef
+      }
+   }
    # Detect columns.  Look for any location where two spaces occur.
    local our %cols;
    local our $linestart= 0;
@@ -310,26 +324,86 @@ sub _parse_code_block {
    { text => $text, subst => \@subst, file => $file }
 }
 
+package CodeGen::Cpppp::Template;
+$INC{'CodeGen/Cpppp/Template.pm'}= 1;
+use v5.20;
+use warnings;
+use Carp;
+
+sub import {
+   my $class= shift;
+   my $caller= caller;
+   for (@_) {
+      if ($_ eq '-setup') {
+         no strict 'refs';
+         push @{$caller.'::ISA'}, $class;
+      } else { croak "$class does not export $_" }
+   }
+}
+
+sub _set_parse_data {
+   my ($class, $parse)= @_;
+   no strict 'refs';
+   ${$class.'::_parse_data'}= $parse;
+}
+
+sub new {
+   my $class= shift;
+   no strict 'refs';
+   bless {
+      %{${$class.'::_parse_data'}},
+      out => {
+         public => '',
+         protected => '',
+         private => '',
+         decl => '',
+         impl => '',
+      }
+   }, $class;
+}
+
+sub render {
+   my $self= shift;
+   $self->{process_result} //= $self->process;
+   return $self->{out}{impl};
+}
+
 sub _render_code_block {
-   my ($self, $block, $expr_subs)= @_;
+   my ($self, $i, @expr_subs)= @_;
+   my $block= $self->{code_block_templates}[$i];
    my $text= $block->{text};
    my $newtext= '';
    my $at= 0;
    my %colpos;
    # First pass, perform substitutions and record new column markers
-   for my $i (0..$#{$block->{subst}}) {
-      my $s= $block->{subst}[$i];
+   for my $s (@{$block->{subst}}) {
+      $newtext .= substr($text, $at, $s->{pos} - $at);
       if ($s->{colgroup}) {
-         push @{$colpos{$s->{colgroup}}}, length($newtext) + $s->{pos} - $at;
+         push @{$colpos{$s->{colgroup}}}, length($newtext);
       }
-      else {
-         $newtext .= substr($text, $at, $s->{pos} - $at);
-         my $fn= $expr_subs->[$i];
-         if ($fn) {
-            $newtext .= $fn->($self, \$newtext);
+      elsif (defined $s->{fn}) {
+         $newtext .= $s->{fn}->($self, \$newtext);
+      }
+      elsif (defined $s->{eval_idx}) {
+         my $fn= $expr_subs[$s->{eval_idx}]
+            or die;
+         # Avoid using $_ so that $_ pases through from the surrounding code into the evals
+         my @out= $fn->($self, \$newtext);
+         for (my $i= 0; $i < @out; $i++) {
+            if (ref $out[$i]) {
+               if (ref $out[$i] eq 'ARRAY') { splice(@out, $i, 1, @{$out[$i]}) }
+               elsif (ref $out[$i] eq 'CODE') { $out[$i]= $out[$i]->($self, \$newtext) }
+            }
          }
-         $at= $s->{pos} + $s->{len};
+         my $out= join $", @out;
+         if (index($out, "\n") >= 0) {
+            my $col= length($newtext) - (rindex($newtext, "\n")+1);
+            my $indent= ' 'x$col;
+            $out =~ s/^/$indent/mg;
+         }
+         $newtext .= $out;
       }
+      $at= $s->{pos} + $s->{len};
    }
    $text= $newtext . substr($text, $at);
    # Second pass, adjust whitespace of all column markers so they line up.
@@ -365,8 +439,17 @@ sub _render_code_block {
          }
       }
    }
-   $self->{out} .= $text;
+   $self->{out}{impl} .= $text;
 }
+
+package CodeGen::Cpppp::Template::Imports;
+use Exporter;
+our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE );
+our %EXPORT_TAGS= ( all => \@EXPORT_OK );
+
+sub PUBLIC {}
+sub PROTECTED {}
+sub PRIVATE {}
 
 1;
 
