@@ -339,7 +339,7 @@ sub _parse_code_block {
       }
    }
    # Now merge the column markers into the substitutions in string order
-   @subst= sort { $a->{pos} <=> $b->{pos} } @subst;
+   @subst= sort { $a->{pos} <=> $b->{pos} or $a->{len} <=> $b->{len} } @subst;
    
    { text => $text, subst => \@subst, file => $file }
 }
@@ -395,11 +395,13 @@ sub _render_code_block {
    my $newtext= '';
    my $at= 0;
    my %colpos;
+   my $prev_colmark;
    # First pass, perform substitutions and record new column markers
    for my $s (@{$block->{subst}}) {
       $newtext .= substr($text, $at, $s->{pos} - $at);
       if ($s->{colgroup}) {
          push @{$colpos{$s->{colgroup}}}, length($newtext);
+         $prev_colmark= $s;
       }
       elsif (defined $s->{fn}) {
          $newtext .= $s->{fn}->($self, \$newtext);
@@ -442,7 +444,18 @@ sub _render_code_block {
          }
          my $out= join $join_sep, @out;
          # Autoindent: if new text contains newline, add current indent to start of each line.
-         $out =~ s/\n/\n$indent/g if $self->{autoindent} && $indent;
+         if ($self->{autoindent} && $indent) {
+            $out =~ s/\n/\n$indent/g;
+            # Another problem - if this item is preceeded by a colgroup,
+            # the colgroup needs extended into the newly added lines.
+            my $linestart= rindex($text, "\n", $s->{pos})+1;
+            if ($prev_colmark && $linestart <= $prev_colmark->{pos}) {
+               while ($out =~ /\n$indent/cg) {
+                  push @{$colpos{$prev_colmark->{colgroup}}},
+                     length($newtext) + $+[0];
+               }
+            }
+         }
          $newtext .= $out;
       }
       $at= $s->{pos} + $s->{len};
@@ -456,6 +469,8 @@ sub _render_code_block {
       my $newcol= 0;
       for (@$group) {
          my $linestart= rindex($text, "\n", $_)+1;
+         substr($text, $_-1, 2) =~ /^\s\S\Z/
+            or die "bug: indent anchor misaligned:\n$text\n'".substr($text, $_-5, 5)."'|'".substr($text, $_, 5)."\n";
          substr($text, $linestart, $_-$linestart) =~ /(.*? ) *$/;
          my $l= length($1);
          $newcol= $l if $l > $newcol;

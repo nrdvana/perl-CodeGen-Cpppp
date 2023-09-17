@@ -34,6 +34,21 @@ my @tests= (
       };
       C
    },
+   {  name => 'indent double expansion',
+      code => <<~'C', file => __FILE__, line => __LINE__,
+      ## my $NAMESPACE= 'x';
+      ## for my $bits (8, 16) {
+      #define ${NAMESPACE}_MAX_TREE_HEIGHT_$bits  ${{2*($bits-1)+1}}
+      #define ${NAMESPACE}_MAX_ELEMENTS_$bits     0x${{sprintf "%X", 2**($bits-1)-1}}
+      ## }
+      C
+      expect => <<~'C',
+      #define x_MAX_TREE_HEIGHT_8 15
+      #define x_MAX_ELEMENTS_8    0x7F
+      #define x_MAX_TREE_HEIGHT_16 31
+      #define x_MAX_ELEMENTS_16    0x7FFF
+      C
+   },
    {  name => 'trim_comma',
       code => <<~'C' , file => __FILE__, line => __LINE__,
       ## my @x= qw( a b c d e f );
@@ -75,7 +90,25 @@ my @tests= (
          y--;
       }
       C
-   }
+   },
+   {  name => 'auto indent after expansion',
+      code => <<~'C', file => __FILE__, line => __LINE__,
+      ## my @fields= qw( x y z );
+      ## my $float_t= 'double';
+      struct Foo {
+         $float_t  scale,
+                   @fields;
+      };
+      C
+      expect => <<~'C'
+      struct Foo {
+         double scale,
+                x,
+                y,
+                z;
+      };
+      C
+   },
 );
 
 for my $t (@tests) {
