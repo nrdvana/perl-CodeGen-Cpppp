@@ -27,8 +27,8 @@ GetOptions(
 if (@ARGV) {
    for (@ARGV) {
       open my $fh, '<:utf8', $_ or die "open($_): $!";
-      print CodeGen::Cpppp->new()->compile_template($fh, $_)->render;
+      print CodeGen::Cpppp->new()->compile_template($fh, $_)->new->render;
    }
 } else {
-   print CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->render;
+   print CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->new->render;
 }
