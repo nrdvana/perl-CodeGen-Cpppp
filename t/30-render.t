@@ -41,7 +41,7 @@ my @tests= (
       ## my $y= '';
       void fn(@x,$y $trim_comma)
       C
-      expect => "void fn(a,b,c,d,e,f )\n",
+      expect => "void fn(a, b, c, d, e, f )\n",
    },
    {  name => "user function",
       code => <<~'C' , file => __FILE__, line => __LINE__,
@@ -53,6 +53,29 @@ my @tests= (
       C
       expect => "got 32\n",
    },
+   {  name => "list autocomma",
+      code => <<~'C', file => __FILE__, line => __LINE__,
+      ## my @x= qw( a b c );
+      foo(@x);
+      ## @x= ();
+      foo(1,2,@x);
+      C
+      expect => "foo(a, b, c);\nfoo(1,2);\n"
+   },
+   {  name => "list autostatement autoindent",
+      code => <<~'C', file => __FILE__, line => __LINE__,
+      ## my @stmt= qw( x++ y-- );
+      if (x) {
+         @stmt;
+      }
+      C
+      expect => <<~'C'
+      if (x) {
+         x++;
+         y--;
+      }
+      C
+   }
 );
 
 for my $t (@tests) {

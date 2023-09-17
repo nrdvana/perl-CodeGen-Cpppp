@@ -135,7 +135,11 @@ sub _parse_cpppp {
       open($in, '<', $tmp) or die;
       defined $in or die;
    }
-   $self->{cpppp_parse}= {};
+   $self->{cpppp_parse}= {
+      autocomma => 1,
+      autostatementline => 1,
+      autoindent => 1,
+   };
    my ($perl, $tpl_start_line, $cur_tpl);
    my $end_tpl= sub {
       if ($cur_tpl =~ /\S/) {
@@ -387,20 +391,42 @@ sub _render_code_block {
       elsif (defined $s->{eval_idx}) {
          my $fn= $expr_subs[$s->{eval_idx}]
             or die;
-         # Avoid using $_ so that $_ pases through from the surrounding code into the evals
+         # Avoid using $_ up to this point so that $_ pases through
+         # from the surrounding code into the evals
          my @out= $fn->($self, \$newtext);
-         for (my $i= 0; $i < @out; $i++) {
-            if (ref $out[$i]) {
-               if (ref $out[$i] eq 'ARRAY') { splice(@out, $i, 1, @{$out[$i]}) }
-               elsif (ref $out[$i] eq 'CODE') { $out[$i]= $out[$i]->($self, \$newtext) }
+         # Expand arrayref and coderefs in the returned list
+         @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
+         ref eq 'CODE' && ($_= $_->($self, \$newtext)) for @out;
+         # Now decide what to join them with.
+         my $join_sep= $";
+         my $indent= '';
+         my ($last_char, $ws)= ($newtext =~ /(\S) (\s*) \Z/x);
+         if (defined $ws && (my $nlpos= rindex($ws, "\n")) >= 0) {
+            $indent= substr($ws, 1+$nlpos);
+         }
+         # Special handling if the user requested a list substitution
+         if (ord $s->{eval} == ord '@') {
+            $last_char= '' unless defined $last_char;
+            if ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(')) {
+               if (@out) {
+                  $join_sep= $indent? ",\n" : ', ';
+                  @out= grep /\S/, @out; # remove items that are only whitespace
+               }
+               # If no items, or the first nonwhitespace character is a comma,
+               # remove the previous comma
+               if (!@out || $out[0] =~ /^\s*,/) {
+                  $newtext =~ s/,(\s*)\Z/$1/;
+               }
+            } elsif ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')) {
+               @out= grep /\S/, @out; # remove items that are only whitespace
+               $join_sep= $indent? ";\n" : "; ";
+            } elsif ($self->{autoindent} && $indent && $join_sep !~ /\n/) {
+               $join_sep .= "\n";
             }
          }
-         my $out= join $", @out;
-         if (index($out, "\n") >= 0) {
-            my $col= length($newtext) - (rindex($newtext, "\n")+1);
-            my $indent= ' 'x$col;
-            $out =~ s/^/$indent/mg;
-         }
+         my $out= join $join_sep, @out;
+         # Autoindent: if new text contains newline, add current indent to start of each line.
+         $out =~ s/\n/\n$indent/g if $self->{autoindent} && $indent;
          $newtext .= $out;
       }
       $at= $s->{pos} + $s->{len};
