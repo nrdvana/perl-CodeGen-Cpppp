@@ -463,14 +463,17 @@ sub _render_code_block {
    $text= $newtext . substr($text, $at);
    # Second pass, adjust whitespace of all column markers so they line up.
    # Iterate from leftmost column rightward.
-   for my $group_i (sort { $a <=> $b } keys %colpos) {
+   autoindent: for my $group_i (sort { $a <=> $b } keys %colpos) {
       my $group= $colpos{$group_i};
       # Find the longest prefix (excluding trailing whitespace)
       my $newcol= 0;
       for (@$group) {
          my $linestart= rindex($text, "\n", $_)+1;
          substr($text, $_-1, 2) =~ /^\s\S\Z/
-            or die "bug: indent anchor misaligned:\n$text\n'".substr($text, $_-5, 5)."'|'".substr($text, $_, 5)."\n";
+            or do {
+               warn "bug: indent anchor misaligned:\n$text\n'".substr($text, $_-5, 5)."'|'".substr($text, $_, 5)."\n";
+               last autoindent;
+            };
          substr($text, $linestart, $_-$linestart) =~ /(.*? ) *$/;
          my $l= length($1);
          $newcol= $l if $l > $newcol;
