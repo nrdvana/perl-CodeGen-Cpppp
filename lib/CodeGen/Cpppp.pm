@@ -211,12 +211,28 @@ sub _gen_perl_call_code_block {
    my $codeblocks= $self->{cpppp_parse}{code_block_templates} ||= [];
    push @$codeblocks, $parsed;
    my $code= '$self->_render_code_block('.$#$codeblocks;
+   my %cache;
    my $i= 0;
+   my $cur_line= 0;
    for my $s (@{$parsed->{subst}}) {
       if (defined $s->{eval}) {
-         $s->{eval_idx}= $i++;
+         # No need to create more than one anonsub for the same expression
+         if (defined $cache{$s->{eval}}) {
+            $s->{eval_idx}= $cache{$s->{eval}};
+            next;
+         }
+         $cache{$s->{eval}}= $s->{eval_idx}= $i++;
          my $sig= $s->{eval} =~ /self|output/? '($self, $output)' : '';
-         $code .= qq{,\n# line $s->{line} "$parsed->{file}"\n  sub${sig}{ $s->{eval} }};
+         if ($s->{line} == $cur_line) {
+            $code .= qq{, sub${sig}{ $s->{eval} }};
+         } elsif ($s->{line} == $cur_line+1) {
+            $cur_line++;
+            $code .= qq{,\n  sub${sig}{ $s->{eval} }};
+         } else {
+            $code .= qq{,\n# line $s->{line} "$parsed->{file}"\n  sub${sig}{ $s->{eval} }};
+            $cur_line= $s->{line};
+            $cur_line++ for $s->{eval} =~ /\n/g;
+         }
       }
    }
    $code .");\n";
