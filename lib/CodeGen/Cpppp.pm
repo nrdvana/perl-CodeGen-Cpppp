@@ -394,13 +394,15 @@ sub _render_code_block {
    my $text= $block->{text};
    my $newtext= '';
    my $at= 0;
-   my %colpos;
+   my %colmarker;
    my $prev_colmark;
    # First pass, perform substitutions and record new column markers
+   my sub str_esc{ join '', map +(ord($_) > 0x7e || ord($_) < 0x21? sprintf("\\x{%X}",ord) : $_), split //, $_[0] }
    for my $s (@{$block->{subst}}) {
       $newtext .= substr($text, $at, $s->{pos} - $at);
       if ($s->{colgroup}) {
-         push @{$colpos{$s->{colgroup}}}, length($newtext);
+         my $mark= $colmarker{$s->{colgroup}} //= join '', "\x{200A}", map chr(0x2000+$_), split //, $s->{colgroup};
+         $newtext .= $mark;
          $prev_colmark= $s;
       }
       elsif (defined $s->{fn}) {
@@ -418,16 +420,18 @@ sub _render_code_block {
          # Now decide what to join them with.
          my $join_sep= $";
          my $indent= '';
-         my ($last_char, $ws)= ($newtext =~ /(\S) (\s*) \Z/x);
-         if (defined $ws && (my $nlpos= rindex($ws, "\n")) >= 0) {
-            $indent= substr($ws, 1+$nlpos);
+         my ($last_char)= ($newtext =~ /(\S) (\s*) \Z/x);
+         my $cur_line= substr($newtext, rindex($newtext, "\n")+1);
+         my $inline= $cur_line =~ /\S/;
+         if ($self->{autoindent}) {
+            ($indent= $cur_line) =~ s/\S/ /g;
          }
          # Special handling if the user requested a list substitution
          if (ord $s->{eval} == ord '@') {
             $last_char= '' unless defined $last_char;
             if ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(')) {
                if (@out) {
-                  $join_sep= $indent? ",\n" : ', ';
+                  $join_sep= $inline? ', ' : ",\n";
                   @out= grep /\S/, @out; # remove items that are only whitespace
                }
                # If no items, or the first nonwhitespace character is a comma,
@@ -437,8 +441,8 @@ sub _render_code_block {
                }
             } elsif ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')) {
                @out= grep /\S/, @out; # remove items that are only whitespace
-               $join_sep= $indent? ";\n" : "; ";
-            } elsif ($self->{autoindent} && $indent && $join_sep !~ /\n/) {
+               $join_sep= $inline? "; " : ";\n";
+            } elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
                $join_sep .= "\n";
             }
          }
@@ -446,15 +450,6 @@ sub _render_code_block {
          # Autoindent: if new text contains newline, add current indent to start of each line.
          if ($self->{autoindent} && $indent) {
             $out =~ s/\n/\n$indent/g;
-            # Another problem - if this item is preceeded by a colgroup,
-            # the colgroup needs extended into the newly added lines.
-            my $linestart= rindex($text, "\n", $s->{pos})+1;
-            if ($prev_colmark && $linestart <= $prev_colmark->{pos}) {
-               while ($out =~ /\n$indent/cg) {
-                  push @{$colpos{$prev_colmark->{colgroup}}},
-                     length($newtext) + $+[0];
-               }
-            }
          }
          $newtext .= $out;
       }
@@ -463,41 +458,20 @@ sub _render_code_block {
    $text= $newtext . substr($text, $at);
    # Second pass, adjust whitespace of all column markers so they line up.
    # Iterate from leftmost column rightward.
-   autoindent: for my $group_i (sort { $a <=> $b } keys %colpos) {
-      my $group= $colpos{$group_i};
+   autoindent: for my $group_i (sort { $a <=> $b } keys %colmarker) {
+      my $token= $colmarker{$group_i};
       # Find the longest prefix (excluding trailing whitespace)
-      my $newcol= 0;
-      for (@$group) {
-         my $linestart= rindex($text, "\n", $_)+1;
-         substr($text, $_-1, 2) =~ /^\s\S\Z/
-            or do {
-               warn "bug: indent anchor misaligned:\n$text\n'".substr($text, $_-5, 5)."'|'".substr($text, $_, 5)."\n";
-               last autoindent;
-            };
-         substr($text, $linestart, $_-$linestart) =~ /(.*? ) *$/;
-         my $l= length($1);
-         $newcol= $l if $l > $newcol;
+      my $maxcol= 0;
+      my ($linestart, $col);
+      while ($text =~ /[ ]*$token/mg) {
+         $linestart= rindex($text, "\n", $-[0])+1;
+         $col= $-[0] - $linestart;
+         $maxcol= $col if $col > $maxcol;
       }
-      # Now update them all to that common length, but after each update
-      # need to update all other positions by the amount changed because the
-      # source string is changing.
-      @$group= sort { $a <=> $b } @$group;
-      for (my $i= 0; $i < @$group; $i++) {
-         my $linestart= rindex($text, "\n", $group->[$i])+1;
-         my $oldcol= $group->[$i] - $linestart;
-         my $diff= $newcol - $oldcol;
-         if ($diff < 0) {
-            substr($text, $linestart + $newcol, -$diff, '');
-         } elsif($diff > 0) {
-            substr($text, $linestart + $oldcol, 0, ' 'x$diff);
-         }
-         # update all positions beyond this one
-         for (values %colpos) {
-            for (@$_) {
-               $_ += $diff if $_ > $group->[$i];
-            }
-         }
-      }
+      $text =~ s/[ ]*$token/
+         $linestart= rindex($text, "\n", $-[0])+1;
+         " "x(1 + $maxcol - ($-[0] - $linestart))
+         /ge;
    }
    $self->{out}{impl} .= $text;
 }
