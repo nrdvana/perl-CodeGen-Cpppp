@@ -25,7 +25,7 @@ I<These go to C<perl>.>
 B<Input:>
 
   #! /usr/bin/env cpppp
-  ## for (my $bits= 8; $bits <= 32; $bits <<= 1) {
+  ## for (my $bits= 8; $bits <= 16; $bits <<= 1) {
   struct tree_node_$bits {
     uint${bits}_t  left:  ${{$bits-1}},
                    color: 1,
@@ -45,22 +45,39 @@ B<Output:>
              right: 15,
              color: 1;
   };
-  struct tree_node_32 {
-    uint32_t left:  31,
-             right: 31,
-             color: 1;
-  };
+
+B<Input:>
+
+  ## my @extra_args;
+  extern int fn( char *format, @extra_args );
+  ## for ('int a', 'int b') {
+  ##   push @extra_args, $_;
+  extern int fn_$_( char *format, @extra_args );
+  ## }
+
+B<Output:>
+
+  extern int fn( char *format  );
+  extern int fn_a( char *format, int a );
+  extern int fn_b( char *format, int a, int b );
 
 =head1 DESCRIPTION
 
 B<WARNING: this API is completely and totally unstable>.
 
-This module is a preprocessor for C, 
+This module is a preprocessor for C, or maybe more like a perl template engine
+that specializes in generating C code.  Each input file gets translated to Perl
+in a way that declares a new OO class, and then you can create instances of that
+class with various parameters to generate your C output, or call methods on it
+like automatically generating headers or function prototypes.
 
-If you have an interest in this, contact me, because I could use help brainstorming ideas
-about how to accommodate the most possibilities, here.
+For the end-user, there is a 'cpppp' command line tool that behaves much like
+the 'cpp' tool.
 
-Possibilities:
+If you have an interest in this, contact me, because I could use help
+brainstorming ideas about how to accommodate the most possibilities, here.
+
+B<Possible Future Features:>
 
 =over
 
@@ -75,6 +92,10 @@ Pass a list of headers through the real cpp and analyze the macro output.
 =item *
 
 Shell out to a compiler to find 'sizeof' information for structs.
+
+=item *
+
+Directly perform the work of inlining one function into another.
 
 =back
 
@@ -98,6 +119,10 @@ sub new {
 
 This reads the input file handle (or scalar-ref) and builds a new perl template
 class out of it (and dies if there are syntax errors in the template).
+
+Yes, this 'eval's the input, and no, there are not any guards against
+malicious templates.  But you run the same risk any time you run someone's
+'./configure' script.
 
 =cut
 
