@@ -2,8 +2,7 @@ package CodeGen::Cpppp;
 use v5.20;
 use warnings;
 use Carp;
-no warnings 'experimental::signatures';
-use feature 'signatures';
+use experimental 'signatures';
 use version;
 use Cwd 'abs_path';
 use Scalar::Util 'blessed';
@@ -170,7 +169,7 @@ sub _process__dump_template_perl($self, @input_args) {
    my $parse= $self->parse_cpppp(@input_args);
    my $code= $self->_gen_perl_template_package($parse);
    require Data::Dumper;
-   my $ofs= index($code, "\nsub process")+1;
+   my $ofs= index($code, "\nsub BUILD")+1;
    print substr($code, 0, $ofs);
    print "our \$_parse_data;\n";
    print Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
@@ -249,9 +248,10 @@ sub _gen_perl_template_package($self, $parse) {
       # All the rest of the user's use/no statements
       @global,
       # Everything after that goes into a sub
-      "sub process(\$self) {",
+      "sub BUILD(\$self, \$constructor_parameters=undef) {",
+      "  Scalar::Util::weaken(\$self);",
       # Inject all the lexical functions that need to be in scope
-      CodeGen::Cpppp::Template->_generate_template_scope_functions($cpppp_ver),
+      $pkg->_gen_perl_scope_functions($cpppp_ver),
       qq{# line $src_lineno "$src_filename"},
       $perl,
       "}",
@@ -279,7 +279,7 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       autoindent => 1,
       filename => $filename,
    };
-   my ($perl, $tpl_start_line, $cur_tpl);
+   my ($perl, $tpl_start_line, $cur_tpl)= ('');
    my $end_tpl= sub {
       if (defined $cur_tpl && $cur_tpl =~ /\S/) {
          my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
@@ -293,13 +293,13 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       if (/^#!/) { # ignore #!
       }
       elsif (/^##/) { # full-line of perl code
-         if (defined $cur_tpl || !defined $perl) {
+         if (defined $cur_tpl || !length $perl) {
             &$end_tpl;
             $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
          s/^##\s?//;
          my $pl= $_;
-         $perl .= $self->_transform_template_perl($pl);
+         $perl .= $self->_transform_template_perl($pl, $.+$line_ofs);
       }
       elsif (/^(.*?) ## ?((?:if|unless|for) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
@@ -324,21 +324,35 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
    delete $self->{cpppp_parse};
 }
 
-sub _transform_template_perl($self, $pl) {
-   # If user declares "sub NAME(", convert that to "my sub NAME" so that we
-   # can grab a ref to it later.
-   if ($pl =~ /\b sub \s* (\w+) \s* \(/x) {
-      push @{$self->{cpppp_parse}{named_subs}}, $1;
-      # look backward and see if it already started with 'my'
-      my $pos= rindex($pl, "my", $-[0]);
-      if ($pos == -1) {
-         substr($pl, $-[0], 0, 'my ');
-      }
+sub _transform_template_perl($self, $pl, $line) {
+   # If user declares "sub NAME(", convert that to "my sub NAME" so that it can
+   # capture refs to the variables of new template instances.
+   if ($pl =~ /(my)? \s* \b sub \s* ([\w_]+) \s* \(/x) {
+      my $name= $2;
+      $self->{cpppp_parse}{template_method}{$name}= $line;
+      my $ofs= $-[0];
+      my $len= defined $1? length $1 : 0;
+      substr($pl, $ofs, $len, "my sub $name; \$self->define_template_method($name => \\&$name);");
    }
-   # If user declares "##define name(", convert that to both a method and a define
-   if ($pl =~ /\b define \s* (\w+) (\s*) \(/x) {
-      push @{$self->{cpppp_parse}{named_subs}}, $1;
-      substr($pl, $-[2], $+[2]-$-[2], '=> \$self->{define}{'.$1.'}; my sub '.$1);
+   # If user declares 'param $foo = $x' adjust that to 'param my $foo = $x'
+   if ($pl =~ /^ \s* (param) \b /xgc) {
+      my $ofs= $-[1];
+      # It's an error if the thing following isn't a variable name
+      $pl =~ /\G \s* ( [\$\@\%] [\w_]+ ) /xgc
+         or croak("Expected variable name (including sigil) after 'param'");
+      my $var_name= $1;
+      $pl =~ /\G \s* ([;=]) /xgc
+         or croak("Parameter declaration $var_name must be followed by '=' or ';'");
+      my $term= $1;
+      my $name= substr($var_name, 1);
+      substr($pl, $ofs, $+[0]-$ofs, qq{param '$name', \\my $var_name }.($term eq ';'? ';' : ','));
+      $self->{cpppp_parse}{template_parameter}{$name}= substr($var_name,0,1);
+   }
+   # If user declares "define name(", convert that to both a method and a define
+   elsif ($pl =~ /^ \s* (define) \s* ([\w_]+) (\s*) \(/x) {
+      my $name= $2;
+      $self->{cpppp_parse}{template_macro}{$name}= 'CODE';
+      substr($pl, $-[1], $-[2]-$-[1], qq{my sub $name; \$self->define_template_macro($name => \\&$name); sub });
    }
    $pl;
 }
@@ -375,7 +389,7 @@ sub _gen_perl_call_code_block($self, $parsed, $indent='') {
    $code . ");\n";
 }
 
-sub _parse_code_block($self, $text, $file, $orig_line) {
+sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
    $text .= "\n" unless substr($text,-1) eq "\n";
    if ($text =~ /^# line (\d+) "([^"]+)"/) {
       $orig_line= $1-1;
@@ -480,6 +494,38 @@ sub _parse_code_block($self, $text, $file, $orig_line) {
    { text => $text, subst => \@subst, file => $file }
 }
 
+=head2 patch_file
+
+  $cpppp->patch_file($filename, $marker, $new_content);
+
+Reads C<$filename>, looking for lines containing C<"BEGIN $merker"> and
+C<"END $marker">.  If not found, it dies.  It then replaces all the lines
+between those two lines with C<$new_content>, and writes it back to the same
+file handle.
+
+Example:
+
+  my $tpl= $cpppp->require_template("example.cp");
+  my $out= $tpl->new->output;
+  $cpppp->patch_file("project.h", "example.cp", $out->get('public'));
+  $cpppp->patch_file("internal.h", "example.cp", $out->get('protected'));
+
+=cut
+
+sub patch_file($self, $fname, $patch_markers, $new_content) {
+   $new_content .= "\n" unless $new_content =~ /\n\Z/;
+   open my $fh, '+<', $fname or die "open($fname): $!";
+   my $content= do { local $/= undef; <$fh> };
+   $content =~ s{(BEGIN \Q$patch_markers\E[^\n]*\n).*?(^[^\n]+?END \Q$patch_markers\E)}
+      {$1$new_content$2}sm
+      or croak "Can't find $patch_markers in $fname";
+   $fh->seek(0,0) or die "seek: $!";
+   $fh->print($content) or die "write: $!";
+   $fh->truncate($fh->tell) or die "truncate: $!";
+   $fh->close or die "close: $!";
+   $self;
+}
+
 1;
 
 __END__
@@ -506,18 +552,6 @@ sub _slurp_file($self, $fname) {
    my $content= do { local $/= undef; <$fh> };
    $fh->close or die "close: $!";
    $content;
-}
-
-sub _patch_file($self, $fname, $patch_markers, $new_content) {
-   open my $fh, '+<', $fname or die "open($fname): $!";
-   my $content= do { local $/= undef; <$fh> };
-   $content =~ s{(BEGIN \Q$patch_markers\E[^\n]*\n).*?(^[^\n]+?END \Q$patch_markers\E)}
-      {$1$new_content$2}sm
-      or croak "Can't find $patch_markers in $fname";
-   $fh->seek(0,0) or die "seek: $!";
-   $fh->print($content) or die "write: $!";
-   $fh->truncate($fh->tell) or die "truncate: $!";
-   $fh->close or die "close: $!";
 }
 
 1;

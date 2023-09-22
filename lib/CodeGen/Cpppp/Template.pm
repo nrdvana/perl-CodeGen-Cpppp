@@ -8,6 +8,7 @@ use warnings;
 use Carp;
 use experimental 'signatures', 'postderef';
 use Scalar::Util 'looks_like_number';
+use Hash::Util;
 use CodeGen::Cpppp::Output;
 use Exporter ();
 require version;
@@ -45,6 +46,20 @@ sub _create_derived_package($class, $version, $parse_data) {
    no strict 'refs';
    @{"${pkg}::ISA"}= ( $class );
    ${"${pkg}::_parse_data"}= $parse_data;
+   # Create accessors for all of the attributes declared in the template.
+   for (keys $parse_data->{template_parameter}->%*) {
+      my $name= $_;
+      *{"${pkg}::$name"}= sub { $_[0]{$name} };
+   }
+   # Expose all of the functions declared in the template
+   for (keys $parse_data->{template_method}->%*) {
+      my $name= $_;
+      *{"${pkg}::$name"}= sub {
+         my $m= shift->{template_method}{$name}
+            or croak "Template execution did not define method '$name'";
+         goto $m;
+      };
+   }
    $pkg;
 }
 
@@ -58,9 +73,11 @@ sub _setup_derived_package($class, $pkg, $version) {
    @{"${pkg}::ISA"}= ( $class ) unless @{"${pkg}::ISA"};
 }
 
-sub _generate_template_scope_functions($class, $version) {
+sub _gen_perl_scope_functions($class, $version) {
    return (
       '# line '. __LINE__ . ' "' . __FILE__ . '"',
+      'my sub param { $self->_init_param(@_) }',
+      'my sub define($name, $replacement){ $self->define_template_macro(@_) }',
       'my sub section($name){ $self->set_current_section($name) }',
       'my sub template($name){ $self->require_template($name) }',
    );
@@ -68,33 +85,76 @@ sub _generate_template_scope_functions($class, $version) {
 
 sub _parse_data($class) {
    no strict 'refs';
+   $class = ref $class if ref $class;
    return ${"${class}::_parse_data"};
 }
 
-sub new($class, @attrs) {
+sub new($class, @args) {
    no strict 'refs';
-   bless {
-      %{${$class.'::_parse_data'}},
+   my %attrs= @args == 1 && ref $args[0]? $args[0]->%*
+      : !(@args&1)? @args
+      : croak "Expected even-length list or hashref";
+   my $parse= $class->_parse_data;
+   # Make sure each attr is the correct type of ref, for the params.
+   for (keys %attrs) {
+      if (my $p= $parse->{template_parameter}{$_}) {
+         if ($p eq '@') { ref $attrs{$_} eq 'ARRAY' or croak("Expected ARRAY for parameter $_"); }
+         elsif ($p eq '%') { ref $attrs{$_} eq 'HASH' or croak("Expected HASH for parameter $_"); }
+      }
+      else {
+         croak("Unknown parameter '$_' to template $parse->{filename}");
+      }
+   }
+
+   my $self= bless {
+      (map +($_ => $parse->{$_}), qw( autocomma autoindent autostatementline )),
       output => CodeGen::Cpppp::Output->new,
-      @attrs == 1 && ref $attrs[0]? %{ $attrs[0] }
-      : !(@attrs&1)? @attrs
-      : croak "Expected even-length list or hashref"
+      %attrs,
    }, $class;
+   $self->BUILD(\%attrs);
+   $self;
 }
 
 sub output($self) {
    $self->{output};
 }
 
+sub _init_param($self, $name, $ref, @initial_value) {
+   if (exists $self->{$name}) {
+      # Assign the value received from constructor to the variable in the template
+        ref $ref eq 'SCALAR'? ($$ref= $self->{$name})
+      : ref $ref eq 'ARRAY' ? (@$ref= @{$self->{$name} || []})
+      : ref $ref eq 'HASH'  ? (%$ref= %{$self->{$name} || {}})
+      : croak "Unhandled ref type ".ref($ref);
+   } else {
+        ref $ref eq 'SCALAR'? ($$ref= $initial_value[0])
+      : ref $ref eq 'ARRAY' ? (@$ref= @initial_value)
+      : ref $ref eq 'HASH'  ? (%$ref= @initial_value)
+      : croak "Unhandled ref type ".ref($ref);
+   }
+   
+   # Now store the variable of the template directly into this hash
+   ref $ref eq 'SCALAR'? Hash::Util::hv_store(%$self, $name, $$ref)
+   : ($self->{$name}= $ref);
+   $ref;
+}
+
+sub define_template_macro($self, $name, $code) {
+   $self->{template_macro}{$name}= $code;
+}
+
+sub define_template_method($self, $name, $code) {
+   $self->{template_method}{$name}= $code;
+}
+
 sub render {
    my $self= shift;
-   $self->{process_result} //= $self->process;
    return $self->output;
 }
 
 sub _render_code_block {
    my ($self, $i, @expr_subs)= @_;
-   my $block= $self->{code_block_templates}[$i];
+   my $block= $self->_parse_data->{code_block_templates}[$i];
    my $text= $block->{text};
    my $newtext= '';
    my $at= 0;
@@ -120,6 +180,7 @@ sub _render_code_block {
          my @out= $fn->($self, \$newtext);
          # Expand arrayref and coderefs in the returned list
          @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
+         @out= grep defined, @out;
          ref eq 'CODE' && ($_= $_->($self, \$newtext)) for @out;
          # Now decide what to join them with.
          my $join_sep= $";
@@ -150,12 +211,12 @@ sub _render_code_block {
                $join_sep .= "\n";
             }
          }
-         my $out= join $join_sep, @out;
+         my $str= join $join_sep, @out;
          # Autoindent: if new text contains newline, add current indent to start of each line.
          if ($self->{autoindent} && $indent) {
-            $out =~ s/\n/\n$indent/g;
+            $str =~ s/\n/\n$indent/g;
          }
-         $newtext .= $out;
+         $newtext .= $str;
       }
       $at= $s->{pos} + $s->{len};
    }

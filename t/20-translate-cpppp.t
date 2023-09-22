@@ -40,7 +40,8 @@ my @tests= (
       for (3..4) {
          $self->_render_code_block(0,
       # line 35 "t/20-translate-cpppp.t"
-            sub{ $_ });
+            sub{ $_ }
+         );
       # line 36 "t/20-translate-cpppp.t"
       }
       pl
