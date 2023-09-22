@@ -1,8 +1,10 @@
 #! /usr/bin/env perl
-# VERSION
 # PODNAME: cpppp
-use strict;
+# VERSION
+# ABSTRACT: Command line tool to process cpppp templates
+use v5.20;
 use warnings;
+use experimental 'signatures';
 use CodeGen::Cpppp;
 use autouse 'Pod::Usage' => 'pod2usage';
 use Getopt::Long;
@@ -15,20 +17,33 @@ Transform perl+C source into C
 
 =head1 OPTIONS
 
-None yet!  but eventually will support many that C<cpp> has, for defining things and parsing
+=over
+
+=item C<--dump-pl>
+
+Output the generated perl sourcecode for the top-level perl script and don't
+execute it.
+
+=back
+
+eventually will support many that C<cpp> has, for defining things and parsing
 headers to discover existing types.
 
 =cut
 
+my $opt_action;
 GetOptions(
-   '--help' => sub { pod2usage(1) },
+   '--dump-pl'               => sub { $opt_action= 'dump_template_perl' },
+   '--help'                  => sub { pod2usage(1) },
+   '--version'               => sub { say CodeGen::Cpppp->VERSION },
 ) or pod2usage(2);
 
+my $cpppp= CodeGen::Cpppp->new(
+   action => $opt_action // 'render',
+);
+
 if (@ARGV) {
-   for (@ARGV) {
-      open my $fh, '<:utf8', $_ or die "open($_): $!";
-      print CodeGen::Cpppp->new()->compile_template($fh, $_)->new->render;
-   }
+   $cpppp->process($_) for @ARGV;
 } else {
-   print CodeGen::Cpppp->new()->compile_template(\*STDIN, 'stdin')->new->render;
+   $cpppp->process(\*STDIN, 'stdin');
 }

@@ -112,9 +112,11 @@ my @tests= (
 );
 
 for my $t (@tests) {
-   my $c= $cpppp->compile_template(\$t->{code}, $t->{file}, $t->{line}+1)->new->render;
+   my $pkg= $cpppp->compile_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $out= $pkg->new->render;
+   my $c= $out->get;
    is( $c, $t->{expect}, $t->{name} )
-      or diag &np([$c]);
+      or diag &np([$out]);
 }
 
 done_testing;

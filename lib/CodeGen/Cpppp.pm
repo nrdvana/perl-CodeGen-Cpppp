@@ -2,8 +2,14 @@ package CodeGen::Cpppp;
 use v5.20;
 use warnings;
 use Carp;
+no warnings 'experimental::signatures';
+use feature 'signatures';
+use version;
+use Cwd 'abs_path';
+use Scalar::Util 'blessed';
+use CodeGen::Cpppp::Template;
 
-# VERSION
+our $VERSION= 0; # VERSION
 # ABSTRACT: The C Perl-Powered Pre-Processor
 
 =head1 SYNOPSIS
@@ -29,6 +35,7 @@ B<Input:>
   struct tree_node_$bits {
     uint${bits}_t  left:  ${{$bits-1}},
                    color: 1,
+                   parent,   ## if $feature_parent;
                    right: ${{$bits-1}};
   };
   ## }
@@ -37,13 +44,13 @@ B<Output:>
 
   struct tree_node_8 {
     uint8_t left:  7,
-            right: 7,
-            color: 1;
+            color: 1,
+            right: 7;
   };
   struct tree_node_16 {
     uint16_t left:  15,
-             right: 15,
-             color: 1;
+             color: 1,
+             right: 15;
   };
 
 B<Input:>
@@ -99,23 +106,94 @@ Directly perform the work of inlining one function into another.
 
 =back
 
+=head1 ATTRIBUTES
+
+=head2 action
+
+The main action to perform in 'process_template':
+
+=over
+
+=item C<'render'>
+
+Render the template.
+
+=item C<'dump_template_perl'>
+
+Render the perl code that would get eval'd for each template.
+
+=back
+
+=cut
+
+sub action { $_[0]{action} }
+
 =head1 CONSTRUCTOR
+
+=head2 new
 
 Bare-bones for now, it accepts whatever hash values you hand to it.
 
 =cut
 
-sub new {
-   my ($class, %attrs)= @_;
-   bless \%attrs, $class;
+sub new($class, @attrs) {
+   bless {
+      out => CodeGen::Cpppp::Output->new,
+      @attrs == 1 && ref $attrs[0]? %{$attrs[0]}
+      : !(@attrs&1)? @attrs
+      : croak "Expected even-length list or hashref"
+   }, $class;
 }
 
 =head1 METHODS
 
-=head2 compile_template
+=head2 process
 
-  $cpppp->compile_template($input_fh, $filename);
-  $cpppp->compile_template(\$scalar_tpl, $filename, $line_offset);
+  $cpppp->process($filename);
+  $cpppp->process($handle, $filename, $line_offset);
+
+Process one template, according to L</action>.  The parameters are the same as
+for L</parse_cpppp>.
+
+=cut
+
+sub process($self, @input_args) {
+   my $m= $self->can('_process__'.$self->action)
+      or croak "Undefined action '".$self->action."'";
+   $self->$m(@input_args);
+}
+sub _process__render($self, @input_args) {
+   my $pkg= $self->compile_cpppp(@input_args);
+   print $pkg->new->render->get;
+}
+sub _process__dump_template_perl($self, @input_args) {
+   my $parse= $self->parse_cpppp(@input_args);
+   my $code= $self->_gen_perl_template_package($parse);
+   require Data::Dumper;
+   my $ofs= index($code, "\nsub process")+1;
+   print substr($code, 0, $ofs);
+   print "our \$_parse_data;\n";
+   print Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
+      ->Indent(1)->Sortkeys(1)->Dump;
+   print substr($code, $ofs);
+}
+
+=head2 require_template
+
+  $cpppp->require_template
+  
+=cut
+
+sub require_template($self, $filename) {
+   my $abs_path= abs_path($filename);
+   $self->{templates}{$abs_path} ||= $self->compile_template($filename);
+}
+
+=head2 compile_cpppp
+
+  $cpppp->compile_cpppp($filename);
+  $cpppp->compile_cpppp($input_fh, $filename);
+  $cpppp->compile_cpppp(\$scalar_tpl, $filename, $line_offset);
 
 This reads the input file handle (or scalar-ref) and builds a new perl template
 class out of it (and dies if there are syntax errors in the template).
@@ -127,68 +205,103 @@ malicious templates.  But you run the same risk any time you run someone's
 =cut
 
 our $next_pkg= 1;
-sub compile_template {
-   my ($self, $in, $filename, $line)= @_;
-   my $parse= $self->_parse_cpppp($in, $filename, $line);
-   my $pkg= 'CodeGen::Cpppp::_Template'.$next_pkg++;
-   my $perl= "package $pkg;\n"
-      ."use v5.20;\n"
-      ."use warnings;\n"
-      ."no warnings 'experimental::lexical_subs', 'experimental::signatures';\n"
-      ."use feature 'lexical_subs', 'signatures';\n"
-      ."use CodeGen::Cpppp::Template -setup;\n"
-      ."sub process(\$self) {\n"
-      ."$parse->{code};\n"
-      ."}\n"
-      ."1\n";
+sub compile_cpppp($self, @input_args) {
+   my $parse= $self->parse_cpppp(@input_args);
+   my $perl= $self->_gen_perl_template_package($parse);
    unless (eval $perl) {
-      my $err= "$@";
-      STDERR->print($perl);
-      die $err;
+      die "$perl\n\nException: $@\n";
    }
-   $pkg->_set_parse_data($parse);
-   return $pkg;
+   return $parse->{package};
 }
 
-sub _parse_cpppp {
-   my ($self, $in, $filename, $line)= @_;
-   my $line_ofs= $line? $line - 1 : 0;
+sub _gen_perl_template_package($self, $parse) {
+   my $perl= $parse->{code} // '';
+   my ($src_lineno, $src_filename, @global, $perl_ver, $cpppp_ver, $tpl_use_line)= (1);
+   # Extract all initial 'use' and 'no' statements from the script.
+   # If they refer to perl or CodeGen:::Cpppp, make a note of it.
+   while ($perl =~ s/^ ( [ \t]+ | [#] .* | use [^;]+ ; | no [^;]+ ; \s* ) \n//gx) {
+      my $line= $1;
+      push @global, $line;
+      $perl_ver= version->parse($1)
+         if $line =~ /use \s+ ( v.* | ["']? [0-9.]+ ["']? ) \s* ; /x;
+      $cpppp_ver= version->parse($1)
+         if $line =~ /use \s+ CodeGen::Cpppp \s* ( v.* | ["']? [0-9.]+ ["']? ) \s* ; /x;
+      $tpl_use_line= 1
+         if $line =~ /use \s+ CodeGen::Cpppp::Template \s+/;
+      if ($line =~ /^# line (\d+) "([^"]+)"/) {
+         $src_lineno= $1;
+         $src_filename= $2;
+      } else {
+         $src_lineno+= 1 + (()= $line =~ /\n/g);
+      }
+   }
+   # Build the boilerplate for the template eval
+   my $pkg= CodeGen::Cpppp::Template->_create_derived_package($cpppp_ver, $parse);
+   $parse->{package}= $pkg;
+   $cpppp_ver //= $VERSION;
+   $src_filename //= $parse->{filename};
+   join '', map "$_\n",
+      "package $pkg;",
+      # Inject a minimum perl version unless user-provided
+      ("use v5.20;")x!(defined $perl_ver),
+      # Inject a Template -setup unless user-provided
+      ("use CodeGen::Cpppp::Template -setup => $cpppp_ver;")x!($tpl_use_line),
+      # All the rest of the user's use/no statements
+      @global,
+      # Everything after that goes into a sub
+      "sub process(\$self) {",
+      # Inject all the lexical functions that need to be in scope
+      CodeGen::Cpppp::Template->_generate_template_scope_functions($cpppp_ver),
+      qq{# line $src_lineno "$src_filename"},
+      $perl,
+      "}",
+      "1";
+}
+
+sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
    if (ref $in eq 'SCALAR') {
       my $tmp= $in;
+      # Opening scalarref fails if it has utf8 flag set
       utf8::encode($tmp) if utf8::is_utf8($tmp);
       undef $in;
-      open($in, '<', $tmp) or die;
-      defined $in or die;
+      open($in, '<', $tmp) or croak "open($tmp): $!";
+      defined $in or die "bug";
    }
+   elsif (ref $in ne 'GLOB' && !(blessed($in) && $in->can('getline'))) {
+      open(my $fh, '<', $in) or croak "open($in): $!";
+      $filename //= "$in";
+      $in= $fh;
+   }
+   my $line_ofs= $line? $line - 1 : 0;
    $self->{cpppp_parse}= {
       autocomma => 1,
       autostatementline => 1,
       autoindent => 1,
+      filename => $filename,
    };
    my ($perl, $tpl_start_line, $cur_tpl);
    my $end_tpl= sub {
-      if ($cur_tpl =~ /\S/) {
+      if (defined $cur_tpl && $cur_tpl =~ /\S/) {
          my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
-         $perl .= $self->_gen_perl_call_code_block($parsed);
+         my $current_indent= $perl =~ /\n([ \t]*).*\n\Z/? $1 : '';
+         $current_indent .= '  ' if $perl =~ /\{ *\n\Z/;
+         $perl .= $self->_gen_perl_call_code_block($parsed, $current_indent);
       }
       $cur_tpl= undef;
    };
    while (<$in>) {
       if (/^#!/) { # ignore #!
       }
-      elsif (/^##(?!#)/) { # full-line of perl code
-         if (defined $cur_tpl) {
+      elsif (/^##/) { # full-line of perl code
+         if (defined $cur_tpl || !defined $perl) {
             &$end_tpl;
             $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
-         elsif (!defined $perl) {
-            $perl= '# line '.($.+$line_ofs).qq{ "$filename"\n};
-         }
          s/^##\s?//;
          my $pl= $_;
-         $perl .= $self->_process_template_perl($pl);
+         $perl .= $self->_transform_template_perl($pl);
       }
-      elsif (/^(.*?) ## ?((?:if|unless) .*)/) { # perl conditional suffix, half tpl/half perl
+      elsif (/^(.*?) ## ?((?:if|unless|for) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
          &$end_tpl if defined $cur_tpl;
          $tpl_start_line= $. + $line_ofs;
@@ -211,8 +324,7 @@ sub _parse_cpppp {
    delete $self->{cpppp_parse};
 }
 
-sub _process_template_perl {
-   my ($self, $pl)= @_;
+sub _transform_template_perl($self, $pl) {
    # If user declares "sub NAME(", convert that to "my sub NAME" so that we
    # can grab a ref to it later.
    if ($pl =~ /\b sub \s* (\w+) \s* \(/x) {
@@ -231,11 +343,10 @@ sub _process_template_perl {
    $pl;
 }
 
-sub _gen_perl_call_code_block {
-   my ($self, $parsed)= @_;
+sub _gen_perl_call_code_block($self, $parsed, $indent='') {
    my $codeblocks= $self->{cpppp_parse}{code_block_templates} ||= [];
    push @$codeblocks, $parsed;
-   my $code= '$self->_render_code_block('.$#$codeblocks;
+   my $code= $indent.'$self->_render_code_block('.$#$codeblocks;
    my %cache;
    my $i= 0;
    my $cur_line= 0;
@@ -252,19 +363,19 @@ sub _gen_perl_call_code_block {
             $code .= qq{, sub${sig}{ $s->{eval} }};
          } elsif ($s->{line} == $cur_line+1) {
             $cur_line++;
-            $code .= qq{,\n  sub${sig}{ $s->{eval} }};
+            $code .= qq{,\n$indent  sub${sig}{ $s->{eval} }};
          } else {
-            $code .= qq{,\n# line $s->{line} "$parsed->{file}"\n  sub${sig}{ $s->{eval} }};
+            $code .= qq{,\n# line $s->{line} "$parsed->{file}"\n$indent  sub${sig}{ $s->{eval} }};
             $cur_line= $s->{line};
             $cur_line++ for $s->{eval} =~ /\n/g;
          }
       }
    }
-   $code .");\n";
+   $code .= "\n$indent" if index($code, "\n") >= 0;
+   $code . ");\n";
 }
 
-sub _parse_code_block {
-   my ($self, $text, $file, $orig_line)= @_;
+sub _parse_code_block($self, $text, $file, $orig_line) {
    $text .= "\n" unless substr($text,-1) eq "\n";
    if ($text =~ /^# line (\d+) "([^"]+)"/) {
       $orig_line= $1-1;
@@ -368,147 +479,6 @@ sub _parse_code_block {
    
    { text => $text, subst => \@subst, file => $file }
 }
-
-package CodeGen::Cpppp::Template;
-$INC{'CodeGen/Cpppp/Template.pm'}= 1;
-use v5.20;
-use warnings;
-use Carp;
-
-sub import {
-   my $class= shift;
-   my $caller= caller;
-   for (@_) {
-      if ($_ eq '-setup') {
-         no strict 'refs';
-         push @{$caller.'::ISA'}, $class;
-      } else { croak "$class does not export $_" }
-   }
-}
-
-sub _set_parse_data {
-   my ($class, $parse)= @_;
-   no strict 'refs';
-   ${$class.'::_parse_data'}= $parse;
-}
-
-sub new {
-   my $class= shift;
-   no strict 'refs';
-   bless {
-      %{${$class.'::_parse_data'}},
-      out => {
-         public => '',
-         protected => '',
-         private => '',
-         decl => '',
-         impl => '',
-      }
-   }, $class;
-}
-
-sub render {
-   my $self= shift;
-   $self->{process_result} //= $self->process;
-   return $self->{out}{impl};
-}
-
-sub _render_code_block {
-   my ($self, $i, @expr_subs)= @_;
-   my $block= $self->{code_block_templates}[$i];
-   my $text= $block->{text};
-   my $newtext= '';
-   my $at= 0;
-   my %colmarker;
-   my $prev_colmark;
-   # First pass, perform substitutions and record new column markers
-   my sub str_esc{ join '', map +(ord($_) > 0x7e || ord($_) < 0x21? sprintf("\\x{%X}",ord) : $_), split //, $_[0] }
-   for my $s (@{$block->{subst}}) {
-      $newtext .= substr($text, $at, $s->{pos} - $at);
-      if ($s->{colgroup}) {
-         my $mark= $colmarker{$s->{colgroup}} //= join '', "\x{200A}", map chr(0x2000+$_), split //, $s->{colgroup};
-         $newtext .= $mark;
-         $prev_colmark= $s;
-      }
-      elsif (defined $s->{fn}) {
-         $newtext .= $s->{fn}->($self, \$newtext);
-      }
-      elsif (defined $s->{eval_idx}) {
-         my $fn= $expr_subs[$s->{eval_idx}]
-            or die;
-         # Avoid using $_ up to this point so that $_ pases through
-         # from the surrounding code into the evals
-         my @out= $fn->($self, \$newtext);
-         # Expand arrayref and coderefs in the returned list
-         @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
-         ref eq 'CODE' && ($_= $_->($self, \$newtext)) for @out;
-         # Now decide what to join them with.
-         my $join_sep= $";
-         my $indent= '';
-         my ($last_char)= ($newtext =~ /(\S) (\s*) \Z/x);
-         my $cur_line= substr($newtext, rindex($newtext, "\n")+1);
-         my $inline= $cur_line =~ /\S/;
-         if ($self->{autoindent}) {
-            ($indent= $cur_line) =~ s/\S/ /g;
-         }
-         # Special handling if the user requested a list substitution
-         if (ord $s->{eval} == ord '@') {
-            $last_char= '' unless defined $last_char;
-            if ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(')) {
-               if (@out) {
-                  $join_sep= $inline? ', ' : ",\n";
-                  @out= grep /\S/, @out; # remove items that are only whitespace
-               }
-               # If no items, or the first nonwhitespace character is a comma,
-               # remove the previous comma
-               if (!@out || $out[0] =~ /^\s*,/) {
-                  $newtext =~ s/,(\s*)\Z/$1/;
-               }
-            } elsif ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')) {
-               @out= grep /\S/, @out; # remove items that are only whitespace
-               $join_sep= $inline? "; " : ";\n";
-            } elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
-               $join_sep .= "\n";
-            }
-         }
-         my $out= join $join_sep, @out;
-         # Autoindent: if new text contains newline, add current indent to start of each line.
-         if ($self->{autoindent} && $indent) {
-            $out =~ s/\n/\n$indent/g;
-         }
-         $newtext .= $out;
-      }
-      $at= $s->{pos} + $s->{len};
-   }
-   $text= $newtext . substr($text, $at);
-   # Second pass, adjust whitespace of all column markers so they line up.
-   # Iterate from leftmost column rightward.
-   autoindent: for my $group_i (sort { $a <=> $b } keys %colmarker) {
-      my $token= $colmarker{$group_i};
-      # Find the longest prefix (excluding trailing whitespace)
-      my $maxcol= 0;
-      my ($linestart, $col);
-      while ($text =~ /[ ]*$token/mg) {
-         $linestart= rindex($text, "\n", $-[0])+1;
-         $col= $-[0] - $linestart;
-         $maxcol= $col if $col > $maxcol;
-      }
-      $text =~ s/[ ]*$token/
-         $linestart= rindex($text, "\n", $-[0])+1;
-         " "x(1 + $maxcol - ($-[0] - $linestart))
-         /ge;
-   }
-   $self->{out}{impl} .= $text;
-}
-
-package CodeGen::Cpppp::Template::Imports;
-use Exporter;
-our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE );
-our %EXPORT_TAGS= ( all => \@EXPORT_OK );
-
-sub PUBLIC {}
-sub PROTECTED {}
-sub PRIVATE {}
 
 1;
 

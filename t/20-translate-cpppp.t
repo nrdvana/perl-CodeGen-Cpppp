@@ -48,7 +48,7 @@ my @tests= (
 );
 
 for my $t (@tests) {
-   my $parse= $cpppp->_parse_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $parse= $cpppp->parse_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
    # remove leading whitespace, so that changes in formatting of the code don't break tests
    $parse->{code} =~ s/^\s+//mg;
    $t->{expect} =~ s/^\s+//mg;
