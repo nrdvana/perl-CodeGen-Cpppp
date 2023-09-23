@@ -10,6 +10,7 @@ use experimental 'signatures', 'postderef';
 use Scalar::Util 'looks_like_number';
 use Hash::Util;
 use CodeGen::Cpppp::Output;
+use CodeGen::Cpppp::AntiCharacter;
 use Exporter ();
 require version;
 
@@ -79,6 +80,8 @@ sub _gen_perl_scope_functions($class, $version) {
       'my sub define($name, $replacement){ $self->define_template_macro($name, $replacement) }',
       'my sub section($name){ $self->current_output_section($name) }',
       'my sub template($name){ $self->require_template($name) }',
+      'my $trim_comma= CodeGen::Cpppp::AntiCharacter->new(qr/,/, qr/\s*/);',
+      'my $trim_ws= CodeGen::Cpppp::AntiCharacter->new(qr/\s*/);',
    );
 }
 
@@ -119,12 +122,14 @@ sub current_output_section($self, $new=undef) {
    if (defined $new) {
       $self->output->has_section($new)
          or croak "No defined output section '$new'";
+      $self->_finish_render;
       $self->{current_output_section}= $new;
    }
    $self->{current_output_section};
 }
 
 sub output($self) {
+   $self->_finish_render;
    $self->{output};
 }
 
@@ -156,6 +161,36 @@ sub define_template_method($self, $name, $code) {
    $self->{template_method}{$name}= $code;
 }
 
+sub _finish_render($self) {
+   return unless defined $self->{current_out};
+   # Second pass, adjust whitespace of all column markers so they line up.
+   # Iterate from leftmost column rightward.
+   for my $group_i (sort { $a <=> $b } keys %{$self->{current_out_colgroup_state}}) {
+      delete $self->{current_out_colgroup_state}{$group_i}
+         if $self->{current_out_colgroup_state}{$group_i} == 2;
+      my $token= _colmarker($group_i);
+      # Find the longest prefix (excluding trailing whitespace)
+      # Also find the max number of digits following column.
+      my ($maxcol, $maxdigit)= (0,0);
+      my ($linestart, $col);
+      while ($self->{current_out} =~ /[ ]* $token (-? 0x[A-Fa-f0-9]+ | -? \d+)? /gx) {
+         $linestart= rindex($self->{current_out}, "\n", $-[0])+1;
+         $col= $-[0] - $linestart;
+         $maxcol= $col if $col > $maxcol;
+         $maxdigit= length $1 if defined $1 && length $1 > $maxdigit;
+      }
+      $self->{current_out} =~ s/[ ]* $token (?= (-? 0x[A-Fa-f0-9]+ | -? \d+)? )/
+         $linestart= rindex($self->{current_out}, "\n", $-[0])+1;
+         " "x(1 + $maxcol - ($-[0] - $linestart) + ($1? $maxdigit - length($1) : 0))
+         /gex;
+   }
+   $self->{output}->append($self->{current_output_section} => $self->{current_out});
+   $self->{current_out}= '';
+}
+
+sub _colmarker($colgroup_id) { join '', "\x{200A}", map chr(0x2000+$_), split //, $colgroup_id; }
+sub _str_esc { join '', map +(ord($_) > 0x7e || ord($_) < 0x21? sprintf("\\x{%X}",ord) : $_), split //, $_[0] }
+
 sub _render_code_block {
    my ($self, $i, @expr_subs)= @_;
    my $block= $self->_parse_data->{code_block_templates}[$i];
@@ -165,16 +200,15 @@ sub _render_code_block {
    my %colmarker;
    my $prev_colmark;
    # First pass, perform substitutions and record new column markers
-   my sub str_esc{ join '', map +(ord($_) > 0x7e || ord($_) < 0x21? sprintf("\\x{%X}",ord) : $_), split //, $_[0] }
-   for my $s (@{$block->{subst}}) {
+   my $subst= $block->{subst};
+   for (my $i= 0; $i < @$subst; $i++) {
+      my $s= $subst->[$i];
       $newtext .= substr($text, $at, $s->{pos} - $at);
       if ($s->{colgroup}) {
-         my $mark= $colmarker{$s->{colgroup}} //= join '', "\x{200A}", map chr(0x2000+$_), split //, $s->{colgroup};
+         my $mark= $colmarker{$s->{colgroup}} //= _colmarker($s->{colgroup});
          $newtext .= $mark;
          $prev_colmark= $s;
-      }
-      elsif (defined $s->{fn}) {
-         $newtext .= $s->{fn}->($self, \$newtext);
+         $self->{current_out_colgroup_state}{$s->{colgroup}}= $s->{last}? 2 : 1;
       }
       elsif (defined $s->{eval_idx}) {
          my $fn= $expr_subs[$s->{eval_idx}]
@@ -184,8 +218,8 @@ sub _render_code_block {
          my @out= $fn->($self, \$newtext);
          # Expand arrayref and coderefs in the returned list
          @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
-         @out= grep defined, @out;
          ref eq 'CODE' && ($_= $_->($self, \$newtext)) for @out;
+         @out= grep defined, @out;
          # Now decide what to join them with.
          my $join_sep= $";
          my $indent= '';
@@ -215,34 +249,20 @@ sub _render_code_block {
                $join_sep .= "\n";
             }
          }
-         my $str= join $join_sep, @out;
-         # Autoindent: if new text contains newline, add current indent to start of each line.
-         if ($self->{autoindent} && $indent) {
-            $str =~ s/\n/\n$indent/g;
+         if (@out) {
+            # 'join' doesn't respect concat magic on AntiCharacter :-(
+            my $str= shift @out;
+            $str .= $join_sep . $_ for @out;
+            # Autoindent: if new text contains newline, add current indent to start of each line.
+            if ($self->{autoindent} && $indent) {
+               $str =~ s/\n/\n$indent/g;
+            }
+            $newtext .= $str;
          }
-         $newtext .= $str;
       }
       $at= $s->{pos} + $s->{len};
    }
-   $text= $newtext . substr($text, $at);
-   # Second pass, adjust whitespace of all column markers so they line up.
-   # Iterate from leftmost column rightward.
-   autoindent: for my $group_i (sort { $a <=> $b } keys %colmarker) {
-      my $token= $colmarker{$group_i};
-      # Find the longest prefix (excluding trailing whitespace)
-      my $maxcol= 0;
-      my ($linestart, $col);
-      while ($text =~ /[ ]*$token/mg) {
-         $linestart= rindex($text, "\n", $-[0])+1;
-         $col= $-[0] - $linestart;
-         $maxcol= $col if $col > $maxcol;
-      }
-      $text =~ s/[ ]*$token/
-         $linestart= rindex($text, "\n", $-[0])+1;
-         " "x(1 + $maxcol - ($-[0] - $linestart))
-         /ge;
-   }
-   $self->{output}->append($self->{current_output_section} => $text);
+   ($self->{current_out} //= '') .= $newtext . substr($text, $at);
 }
 
 1;

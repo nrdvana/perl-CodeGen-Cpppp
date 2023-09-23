@@ -8,29 +8,33 @@ my $cpppp= CodeGen::Cpppp->new;
 my @tests= (
    {  name => "loop, tpl, indent",
       code => <<~'C' , file => __FILE__, line => __LINE__,
-      ## for (my $bits= 8; $bits <= 32; $bits <<= 1) {
+      #! /usr/bin/env cpppp
+      ## param $min_bits = 8;
+      ## param $max_bits = 16;
+      ## param $feature_parent = 0;
+      ## param $feature_count = 0;
+      ##
+      ## for (my $bits= $min_bits; $bits <= $max_bits; $bits <<= 1) {
       struct tree_node_$bits {
-          uint${bits}_t  left: ${{$bits-1}},
-                         color: 1,
-                         right: ${{$bits-1}};
+          uint${bits}_t  left :  ${{$bits-1}},
+                         color:  1,
+                         right:  ${{$bits-1}},
+                         parent,   ## if $feature_parent;
+                         count,    ## if $feature_count;
+                         $trim_comma $trim_ws;
       };
       ## }
       C
       expect => <<~'C',
       struct tree_node_8 {
-          uint8_t left: 7,
-                  color: 1,
-                  right: 7;
+          uint8_t  left :  7,
+                   color:  1,
+                   right:  7;
       };
       struct tree_node_16 {
-          uint16_t left: 15,
-                   color: 1,
+          uint16_t left : 15,
+                   color:  1,
                    right: 15;
-      };
-      struct tree_node_32 {
-          uint32_t left: 31,
-                   color: 1,
-                   right: 31;
       };
       C
    },
@@ -43,13 +47,13 @@ my @tests= (
       ## }
       C
       expect => <<~'C',
-      #define x_MAX_TREE_HEIGHT_8 15
-      #define x_MAX_ELEMENTS_8    0x7F
-      #define x_MAX_TREE_HEIGHT_16 31
+      #define x_MAX_TREE_HEIGHT_8      15
+      #define x_MAX_ELEMENTS_8       0x7F
+      #define x_MAX_TREE_HEIGHT_16     31
       #define x_MAX_ELEMENTS_16    0x7FFF
       C
    },
-   {  name => 'trim_comma',
+   {  name => 'anticomma',
       code => <<~'C' , file => __FILE__, line => __LINE__,
       ## my @x= qw( a b c d e f );
       ## local $"= ',';

@@ -5,7 +5,7 @@ use Carp;
 use experimental 'signatures';
 use version;
 use Cwd 'abs_path';
-use Scalar::Util 'blessed';
+use Scalar::Util 'blessed', 'looks_like_number';
 use CodeGen::Cpppp::Template;
 
 our $VERSION= 0; # VERSION
@@ -30,26 +30,33 @@ I<These go to C<perl>.>
 B<Input:>
 
   #! /usr/bin/env cpppp
-  ## for (my $bits= 8; $bits <= 16; $bits <<= 1) {
+  ## param $min_bits = 8;
+  ## param $max_bits = 16;
+  ## param $feature_parent = 0;
+  ## param $feature_count = 0;
+  ##
+  ## for (my $bits= $min_bits; $bits <= $max_bits; $bits <<= 1) {
   struct tree_node_$bits {
-    uint${bits}_t  left:  ${{$bits-1}},
-                   color: 1,
+    uint${bits}_t  left :  ${{$bits-1}},
+                   color:  1,
+                   right:  ${{$bits-1}},
                    parent,   ## if $feature_parent;
-                   right: ${{$bits-1}};
+                   count,    ## if $feature_count;
+                   $trim_comma $trim_ws;
   };
   ## }
 
 B<Output:>
 
   struct tree_node_8 {
-    uint8_t left:  7,
-            color: 1,
-            right: 7;
+      uint8_t  left :  7,
+               color:  1,
+               right:  7;
   };
   struct tree_node_16 {
-    uint16_t left:  15,
-             color: 1,
-             right: 15;
+      uint16_t left : 15,
+               color:  1,
+               right: 15;
   };
 
 B<Input:>
@@ -277,10 +284,13 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       autocomma => 1,
       autostatementline => 1,
       autoindent => 1,
+      autocolumn => 1,
       filename => $filename,
+      colmarker => {},
+      coltrack => { },
    };
-   my ($perl, $tpl_start_line, $cur_tpl)= ('');
-   my $end_tpl= sub {
+   my ($perl, $block_group, $tpl_start_line, $cur_tpl)= ('', 1);
+   my sub end_tpl {
       if (defined $cur_tpl && $cur_tpl =~ /\S/) {
          my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
          my $current_indent= $perl =~ /\n([ \t]*).*\n\Z/? $1 : '';
@@ -294,19 +304,19 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       }
       elsif (/^##/) { # full-line of perl code
          if (defined $cur_tpl || !length $perl) {
-            $end_tpl->();
+            end_tpl();
             $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
          s/^##\s?//;
          my $pl= $_;
          $perl .= $self->_transform_template_perl($pl, $.+$line_ofs);
       }
-      elsif (/^(.*?) ## ?((?:if|unless|for) .*)/) { # perl conditional suffix, half tpl/half perl
+      elsif (/^(.*?) ## ?((?:if|unless|for|while|unless) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
-         $end_tpl->() if defined $cur_tpl;
+         end_tpl() if defined $cur_tpl;
          $tpl_start_line= $. + $line_ofs;
          $cur_tpl= $tpl;
-         $end_tpl->();
+         end_tpl();
          $perl =~ s/;\s*$//; # remove semicolon
          $pl .= ';' unless $pl =~ /;\s*$/; # re-add it if user didn't
          $perl .= qq{\n# line }.($.+$line_ofs).qq{ "$filename"\n    $pl\n};
@@ -319,7 +329,12 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
          $cur_tpl .= $_;
       }
    }
-   $end_tpl->() if defined $cur_tpl;
+   end_tpl() if defined $cur_tpl;
+
+   # Resolve final bits of column tracking
+   my $ct= delete $self->{cpppp_parse}{coltrack};
+   _finish_coltrack($ct, $_) for grep looks_like_number($_), keys %$ct;
+
    $self->{cpppp_parse}{code}= $perl;
    delete $self->{cpppp_parse};
 }
@@ -389,6 +404,17 @@ sub _gen_perl_call_code_block($self, $parsed, $indent='') {
    $code . ");\n";
 }
 
+sub _finish_coltrack($coltrack, $col) {
+   # did it eventually have an eval to the left?
+   if (grep $_->{follows_eval}, $coltrack->{$col}{members}->@*) {
+      $coltrack->{$col}{members}[-1]{last}= 1;
+   } else {
+      # invalidate them all, they won't become unaligned anyway.
+      $_->{colgroup}= undef for $coltrack->{$col}{members}->@*;
+   }
+   delete $coltrack->{$col};
+}
+
 sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
    $text .= "\n" unless substr($text,-1) eq "\n";
    if ($text =~ /^# line (\d+) "([^"]+)"/) {
@@ -396,11 +422,19 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
       $file= $2;
    }
    local our $line= $orig_line || 1;
+   local our $parse= $self->{cpppp_parse};
    local our $start;
    local our @subst;
+   # Everything in coltrack that survived the last _parse_code_block call
+   # ended on the final line of the template.  Set the line numbers to
+   # continue into this template.
+   for my $c (grep looks_like_number($_), keys $parse->{coltrack}->%*) {
+      $parse->{coltrack}{$c}{line}= $line;
+   }
    local $_= $text;
    # Parse and record the locations of the embedded perl statements
    ()= m{
+      # Rough approximation of continuation of perl expressions in quoted strings
       (?(DEFINE)
          (?<BALANCED_EXPR> (?>
               \{ (?&BALANCED_EXPR) \}
@@ -410,86 +444,75 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
             | \n (?{ $line++ })
          )* )
       )
+      
+      # Start of a perl expression in a quoted string
       [\$\@] (?{ $start= -1+pos }) 
-      (?:
-        \{ (?&BALANCED_EXPR) \}           # 
-        | [\w_]+                          # plain variable
-         (?:                              # maybe followed by ->[] or similar
-            (?: -> )?
-            (?: \{ (?&BALANCED_EXPR) \} | \[ (?&BALANCED_EXPR) \] )
-         ) *                       
-      ) (?{ push @subst, { pos => $start, len => -$start+pos, line => $line };
-            
-          })
+         (?:
+           \{ (?&BALANCED_EXPR) \}           # 
+           | [\w_]+                          # plain variable
+            (?:                              # maybe followed by ->[] or similar
+               (?: -> )?
+               (?: \{ (?&BALANCED_EXPR) \} | \[ (?&BALANCED_EXPR) \] )
+            ) *                       
+         ) (?{ push @subst, { pos => $start, len => -$start+pos, line => $line }; })
+      
+      # Track what line we're on
       | \n     (?{ $line++ })
+      
+      # Column alignment detection for the autocolumn feature
+      | (?{ $start= pos; }) [ \t]{2,}+ (?{
+            push @subst, { pos => pos, len => 0, line => $line, colgroup => undef };
+        })
    }xg;
    
+   my $prev_eval;
    for (0..$#subst) {
       my $s= $subst[$_];
-      # Special cases
-      my $expr= substr($text, $s->{pos}, $s->{len});
-      if ($expr eq '$trim_comma') {
-         # Modify the text being created to remove the final comma
-         $s->{fn}= sub { ${$_[1]} =~ s/,(\s*)$/$1/; '' };
-      } elsif ($expr =~ /^ \$\{\{ (.*) \}\} $/x) {
-         # Notation ${{ ... }} is a shortcut for @{[do{ ... }]}
-         $s->{eval}= $1;
-      } else {
-         $s->{eval}= $expr; # Will need to be filled in with a coderef
-      }
-   }
-   # Detect columns.  Look for any location where two spaces occur.
-   local our %cols;
-   local our $linestart= 0;
-   $line= $orig_line || 1;
-   pos= 0;
-   while (m{\G(?>
-        \n (?{ ++$line; $linestart= pos })
-      | [ ][ ]+ (?{ push @{$cols{-$linestart + pos}}, { pos => pos, len => 0, line => $line  } })
-      | .
-   )}xcg) {}
-   warn "BUG: failed to parse columns" unless pos == length($text);
-   # Delete all column markers that occur inside of code substitutions
-   for my $s (@subst) {
-      for my $col (grep $_ > $s->{pos} && $_ < $s->{pos} + $s->{len}, keys %cols) {
-         my $markers= $cols{$col};
-         @$markers= grep $_->{pos} > $s->{pos}+$s->{len} || $_->{pos} < $s->{pos},
-            @$markers;
-      }
-   }
-   # Detect the actual columns from the remaining markers
-   my $colgroup= 0;
-   for my $col (sort { $a <=> $b } keys %cols) {
-      # Find out which column markers are from adjacent lines
-      my $lines= $cols{$col};
-      my @adjacent= [ $lines->[0] ];
-      for (1..$#$lines) {
-         if ($adjacent[-1][-1]{line} + 1 == $lines->[$_]{line}) {
-            push @{ $adjacent[-1] }, $lines->[$_];
-         } else {
-            push @adjacent, [ $lines->[$_] ];
-         }
-      }
-      # Need at least 2 adjacent lines to count as a colum.
-      for (grep @$_ > 1, @adjacent) {
-         # At least one of the lines must have text to the left of it
-         my $has_left= 0;
-         for (@$_) {
-            my $linestart= rindex($text, "\n", $_->{pos})+1;
-            if (substr($text, $linestart, $_->{pos}-$linestart) =~ /\S/) {
-               $has_left= 1;
-               last;
+      if (exists $s->{colgroup}) {
+         my $linestart= (rindex($text, "\n", $s->{pos})+1);
+         my $col= $s->{pos} - $linestart;
+         $s->{follows_eval}= $prev_eval && $prev_eval->{line} == $s->{line};
+         # If same column as previous line, continue the coltracking.
+         if ($parse->{coltrack}{$col}) {
+            if ($parse->{coltrack}{$col}{members}[-1]{line} == $s->{line} - 1) {
+               push @{ $parse->{coltrack}{$col}{members} }, $s;
+               $s->{colgroup}= $parse->{coltrack}{$col}{id};
+               $parse->{coltrack}{$col}{line}= $s->{line};
+               next;
             }
+            # column ended prior to this
+            _finish_coltrack($parse->{coltrack}, $col);
          }
-         next unless $has_left;
-         # this is a new linked column group
-         ++$colgroup;
-         # add one column marker per line in this group
-         push @subst, map +{ colgroup => $colgroup, pos => $_->{pos}, len => 0, line => $_->{line} }, @$_;
+         # There's no need to create a column unless nonspace to the left
+         # Otherwise it would just be normal indent.
+         if (substr($text, $linestart, $s->{pos} - $linestart) =~ /\S/) {
+            # new column begins
+            $s->{colgroup}= $col*10000 + ++$parse->{coltrack}{next_id}{$col};
+            $s->{first}= 1;
+            $parse->{coltrack}{$col}= {
+               id => $s->{colgroup},
+               members => [ $s ],
+            };
+         }
+      }
+      else { # Perl expression
+         my $expr= substr($text, $s->{pos}, $s->{len});
+         # Special case: ${{  }} notation is a shortcut for @{[do{ ... }]}
+         if ($expr =~ /^ \$\{\{ (.*) \}\} $/x) {
+            $s->{eval}= $1;
+         } else {
+            $s->{eval}= $expr; # Will need to be filled in with a coderef
+         }
+         $prev_eval= $s;
       }
    }
-   # Now merge the column markers into the substitutions in string order
-   @subst= sort { $a->{pos} <=> $b->{pos} or $a->{len} <=> $b->{len} } @subst;
+   # cleanup
+   for my $c (grep looks_like_number($_), keys $parse->{coltrack}->%*) {
+      if ($parse->{coltrack}{$c}{line} < $line-1) {
+         _finish_coltrack($parse->{coltrack}, $c);
+      }
+   }
+   @subst= grep defined $_->{eval} || defined $_->{colgroup}, @subst;
    
    { text => $text, subst => \@subst, file => $file }
 }

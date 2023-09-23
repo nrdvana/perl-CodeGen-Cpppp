@@ -26,9 +26,9 @@ my @tests= (
       C
       expect => {
          subst => [
-            { pos =>  8, len => 0, colgroup => 1, line => 1 },
+            { pos =>  8, len => 0, colgroup => 80001, follows_eval => F, line => 1 },
             { pos => 11, len => 5, line => 2 },
-            { pos => 19, len => 0, colgroup => 1, line => 2 },
+            { pos => 19, len => 0, colgroup => 80001, follows_eval => T, line => 2 },
          ],
       }
    }
