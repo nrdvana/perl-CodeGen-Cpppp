@@ -170,7 +170,7 @@ sub process($self, @input_args) {
 }
 sub _process__render($self, @input_args) {
    my $pkg= $self->compile_cpppp(@input_args);
-   print $pkg->new->render->get;
+   print $pkg->new->output->get;
 }
 sub _process__dump_template_perl($self, @input_args) {
    my $parse= $self->parse_cpppp(@input_args);
@@ -491,6 +491,7 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
             $s->{first}= 1;
             $parse->{coltrack}{$col}= {
                id => $s->{colgroup},
+               line => $s->{line},
                members => [ $s ],
             };
          }
