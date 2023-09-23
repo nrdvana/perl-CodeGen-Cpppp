@@ -22,28 +22,23 @@ The default sections are:
 =item public
 
 Lines of code for the public header.  Maybe also inline functions.
-C<priority=10>
+C<priority=100>
 
 =item protected
 
 Lines of code for consumption by other related modules, exposing more data
 structures and macros than are appropriate for the public header.
-C<priority=20>
+C<priority=200>
 
 =item private
 
-Lines of code that define things that no other compilation unit should need.
-These typically would get written into the top of the compilation unit itself.
-C<priority=50>
-
-=item impl
-
-The implementation of the compilation unit.  This contains everything else.
-C<priority=100>
+The implementation of the compilation unit, and declarations of things that
+will only affect this compilation unit.
+C<priority=10000>
 
 =back
 
-You can append or prefix blocks of code to any of these sections, or define
+You can append or prepend blocks of code to any of these sections, or define
 additional sections of your own.  The sections you define should be assigned
 a C<priority> to help sort them into the list above.  You may use floating
 point numbers.
@@ -59,8 +54,7 @@ Standard constructor, accpeting key/val list or hashref.
 our %standard_sections= (
    public => 100,
    protected => 200,
-   private => 500,
-   impl => 10000,
+   private => 10000,
 );
 sub new($class, @args) {
    bless {
@@ -78,7 +72,7 @@ sub new($class, @args) {
   $out->declare_sections($name1 => $priority, $name2 => ..);
 
 Declare one or more new sections.  If you omit the priority values, they will
-be automatically selected counting upward from the last section below C<'impl'>.
+be automatically selected counting upward from the last section before C<'private'>.
 
 =head2 section_priority
 
@@ -96,14 +90,18 @@ sub section_list($self) {
    sort { $pri->{$a} <=> $pri->{$b} } keys %$pri;
 }
 
+sub has_section($self, $name) {
+   defined $self->section_priority->{$name};
+}
+
 sub section_priority($self) {
    $self->{section_priority}
 }
 
 sub declare_sections($self, @list) {
    my $pri= $self->section_priority;
-   my $max_before_impl= max grep $_ < $pri->{impl}, values %$pri;
-   my $next= $max_before_impl + 1;
+   my $max_before_private= max grep $_ < $pri->{private}, values %$pri;
+   my $next= $max_before_private + 1;
    while (@list) {
       my $name= shift @list;
       looks_like_number($name) and croak "Expected non-numeric name at '$name'";
@@ -145,7 +143,7 @@ sub prepend($self, $section, @code) {
 
   $all= $out->get;
   $header= $out->get('public','protected');
-  $unit= $out->get('private..impl');
+  $unit= $out->get('protected..private');
 
 Collect the output from all or specified sections.  An empty list returns all
 sections.  The special notation '..' returns a range of sections, inclusive.
@@ -158,7 +156,7 @@ sub get($self, @sections) {
    if (@sections) {
       my %s;
       for (@sections) {
-         if (/([^.]+)..([^.]+)/) {
+         if (/([^.]+)\.\.([^.]+)/) {
             my $low= $sec_pri->{$1} // croak "Unknown section $1";
             my $high= $sec_pri->{$2} // croak "Unknown section $2";
             for (keys %$sec_pri) {

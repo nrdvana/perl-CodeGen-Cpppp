@@ -113,7 +113,7 @@ my @tests= (
 
 for my $t (@tests) {
    my $pkg= $cpppp->compile_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
-   my $out= $pkg->new->render;
+   my $out= $pkg->new->output;
    my $c= $out->get;
    is( $c, $t->{expect}, $t->{name} )
       or diag &np([$out]);

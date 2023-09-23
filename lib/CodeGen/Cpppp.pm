@@ -294,7 +294,7 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       }
       elsif (/^##/) { # full-line of perl code
          if (defined $cur_tpl || !length $perl) {
-            &$end_tpl;
+            $end_tpl->();
             $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
          }
          s/^##\s?//;
@@ -303,10 +303,10 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       }
       elsif (/^(.*?) ## ?((?:if|unless|for) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
-         &$end_tpl if defined $cur_tpl;
+         $end_tpl->() if defined $cur_tpl;
          $tpl_start_line= $. + $line_ofs;
          $cur_tpl= $tpl;
-         &$end_tpl;
+         $end_tpl->();
          $perl =~ s/;\s*$//; # remove semicolon
          $pl .= ';' unless $pl =~ /;\s*$/; # re-add it if user didn't
          $perl .= qq{\n# line }.($.+$line_ofs).qq{ "$filename"\n    $pl\n};
@@ -319,7 +319,7 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
          $cur_tpl .= $_;
       }
    }
-   &$end_tpl if defined $cur_tpl;
+   $end_tpl->() if defined $cur_tpl;
    $self->{cpppp_parse}{code}= $perl;
    delete $self->{cpppp_parse};
 }
@@ -327,12 +327,12 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
 sub _transform_template_perl($self, $pl, $line) {
    # If user declares "sub NAME(", convert that to "my sub NAME" so that it can
    # capture refs to the variables of new template instances.
-   if ($pl =~ /(my)? \s* \b sub \s* ([\w_]+) \s* \(/x) {
+   if ($pl =~ /(my)? \s* \b sub \s* ([\w_]+) \b \s* /x) {
       my $name= $2;
-      $self->{cpppp_parse}{template_method}{$name}= $line;
+      $self->{cpppp_parse}{template_method}{$name}= { line => $line };
       my $ofs= $-[0];
-      my $len= defined $1? length $1 : 0;
-      substr($pl, $ofs, $len, "my sub $name; \$self->define_template_method($name => \\&$name);");
+      my $ofs2= defined $1? $+[1] : $ofs;
+      substr($pl, $ofs, $ofs2-$ofs, "my sub $name; \$self->define_template_method($name => \\&$name);");
    }
    # If user declares 'param $foo = $x' adjust that to 'param my $foo = $x'
    if ($pl =~ /^ \s* (param) \b /xgc) {
@@ -524,27 +524,6 @@ sub patch_file($self, $fname, $patch_markers, $new_content) {
    $fh->truncate($fh->tell) or die "truncate: $!";
    $fh->close or die "close: $!";
    $self;
-}
-
-1;
-
-__END__
-sub patch_header($self, $fname, $patch_markers=undef) {
-   $patch_markers //= "GENERATED ".uc($self->namespace)." HEADERS";
-   $self->_patch_file($fname, $patch_markers,
-      join '', map { chomp; "$_\n" } $self->public_decl->@*, $self->public_type->@*, $self->public_impl->@*);
-}
-
-sub patch_source($self, $fname, $patch_markers=undef) {
-   $patch_markers //= "GENERATED ".uc($self->namespace)." IMPLEMENTATION";
-   $self->_patch_file($fname, $patch_markers,
-      join '', map { chomp; "$_\n" } $self->private_decl->@*, $self->private_type->@*, $self->private_impl->@*);
-}
-
-sub patch_xs_boot($self, $fname, $patch_markers=undef) {
-   $patch_markers //= "GENERATED ".uc($self->namespace)." XS BOOT";
-   $self->_patch_file($fname, $patch_markers,
-      join '', map { chomp; "$_\n" } $self->xs_boot->@*);
 }
 
 sub _slurp_file($self, $fname) {

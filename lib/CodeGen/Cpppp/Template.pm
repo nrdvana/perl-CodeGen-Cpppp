@@ -14,12 +14,11 @@ use Exporter ();
 require version;
 
 use constant {
-   public    => 'PUBLIC',
-   protected => 'PROTECTED',
-   private   => 'PRIVATE',
-   impl      => 'IMPL',
+   PUBLIC     => 'public',
+   PROTECTED  => 'protected',
+   PRIVATE    => 'private',
 };
-our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE IMPL );
+our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE );
 our %EXPORT_TAGS= (
    'v0' => \@EXPORT_OK,
 );
@@ -77,8 +76,8 @@ sub _gen_perl_scope_functions($class, $version) {
    return (
       '# line '. __LINE__ . ' "' . __FILE__ . '"',
       'my sub param { $self->_init_param(@_) }',
-      'my sub define($name, $replacement){ $self->define_template_macro(@_) }',
-      'my sub section($name){ $self->set_current_section($name) }',
+      'my sub define($name, $replacement){ $self->define_template_macro($name, $replacement) }',
+      'my sub section($name){ $self->current_output_section($name) }',
       'my sub template($name){ $self->require_template($name) }',
    );
 }
@@ -109,10 +108,20 @@ sub new($class, @args) {
    my $self= bless {
       (map +($_ => $parse->{$_}), qw( autocomma autoindent autostatementline )),
       output => CodeGen::Cpppp::Output->new,
+      current_output_section => 'private',
       %attrs,
    }, $class;
    $self->BUILD(\%attrs);
    $self;
+}
+
+sub current_output_section($self, $new=undef) {
+   if (defined $new) {
+      $self->output->has_section($new)
+         or croak "No defined output section '$new'";
+      $self->{current_output_section}= $new;
+   }
+   $self->{current_output_section};
 }
 
 sub output($self) {
@@ -145,11 +154,6 @@ sub define_template_macro($self, $name, $code) {
 
 sub define_template_method($self, $name, $code) {
    $self->{template_method}{$name}= $code;
-}
-
-sub render {
-   my $self= shift;
-   return $self->output;
 }
 
 sub _render_code_block {
@@ -238,7 +242,7 @@ sub _render_code_block {
          " "x(1 + $maxcol - ($-[0] - $linestart))
          /ge;
    }
-   $self->{output}->append(impl => $text);
+   $self->{output}->append($self->{current_output_section} => $text);
 }
 
 1;
