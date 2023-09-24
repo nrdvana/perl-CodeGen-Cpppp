@@ -49,14 +49,14 @@ B<Input:>
 B<Output:>
 
   struct tree_node_8 {
-      uint8_t  left :  7,
-               color:  1,
-               right:  7;
+    uint8_t  left :  7,
+             color:  1,
+             right:  7;
   };
   struct tree_node_16 {
-      uint16_t left : 15,
-               color:  1,
-               right: 15;
+    uint16_t left : 15,
+             color:  1,
+             right: 15;
   };
 
 B<Input:>
@@ -114,25 +114,15 @@ Directly perform the work of inlining one function into another.
 
 =head1 ATTRIBUTES
 
-=head2 action
+=head2 output
 
-The main action to perform in 'process_template':
-
-=over
-
-=item C<'render'>
-
-Render the template.
-
-=item C<'dump_template_perl'>
-
-Render the perl code that would get eval'd for each template.
-
-=back
+An instance of L<CodeGen::Cpppp::Output> that is used as the default C<output>
+parameter for all automatically-created templates, thus collecting all their
+output.
 
 =cut
 
-sub action { $_[0]{action} }
+sub output { $_[0]{output} }
 
 =head1 CONSTRUCTOR
 
@@ -144,7 +134,7 @@ Bare-bones for now, it accepts whatever hash values you hand to it.
 
 sub new($class, @attrs) {
    bless {
-      out => CodeGen::Cpppp::Output->new,
+      output => CodeGen::Cpppp::Output->new,
       @attrs == 1 && ref $attrs[0]? %{$attrs[0]}
       : !(@attrs&1)? @attrs
       : croak "Expected even-length list or hashref"
@@ -170,18 +160,22 @@ sub process($self, @input_args) {
 }
 sub _process__render($self, @input_args) {
    my $pkg= $self->compile_cpppp(@input_args);
-   print $pkg->new->output->get;
+   my $params= $pkg->coerce_parameters($self->params);
+   $params->{output}= $self->output;
+   my $tpl= $pkg->new($params);
+   # tpl already wrote to ->output
 }
 sub _process__dump_template_perl($self, @input_args) {
    my $parse= $self->parse_cpppp(@input_args);
+   $self->output->declare_section('template_perl');
    my $code= $self->_gen_perl_template_package($parse);
    require Data::Dumper;
+   my $dumper= Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
+      ->Indent(1)->Sortkeys(1);
    my $ofs= index($code, "\nsub BUILD")+1;
-   print substr($code, 0, $ofs);
-   print "our \$_parse_data;\n";
-   print Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
-      ->Indent(1)->Sortkeys(1)->Dump;
-   print substr($code, $ofs);
+   $self->output->append(template_perl => substr($code, 0, $ofs) . "our \$_parse_data;\n");
+   $self->output->append(template_perl => $dumper->Dump);
+   $self->output->append(template_perl => substr($code, $ofs));
 }
 
 =head2 require_template
@@ -220,7 +214,7 @@ sub compile_cpppp($self, @input_args) {
    return $parse->{package};
 }
 
-sub _gen_perl_template_package($self, $parse) {
+sub _gen_perl_template_package($self, $parse, %opts) {
    my $perl= $parse->{code} // '';
    my ($src_lineno, $src_filename, @global, $perl_ver, $cpppp_ver, $tpl_use_line)= (1);
    # Extract all initial 'use' and 'no' statements from the script.
@@ -241,6 +235,14 @@ sub _gen_perl_template_package($self, $parse) {
          $src_lineno+= 1 + (()= $line =~ /\n/g);
       }
    }
+   if ($opts{with_data}) {
+      require Data::Dumper;
+      my $dumper= Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
+         ->Indent(1)->Sortkeys(1);
+      push @global,
+         'our $_parse_data; '.$dumper->Dump;
+   }
+
    # Build the boilerplate for the template eval
    my $pkg= CodeGen::Cpppp::Template->_create_derived_package($cpppp_ver, $parse);
    $parse->{package}= $pkg;
@@ -266,20 +268,24 @@ sub _gen_perl_template_package($self, $parse) {
 }
 
 sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
+   my @lines;
    if (ref $in eq 'SCALAR') {
-      my $tmp= $in;
-      # Opening scalarref fails if it has utf8 flag set
-      utf8::encode($tmp) if utf8::is_utf8($tmp);
-      undef $in;
-      open($in, '<', $tmp) or croak "open($tmp): $!";
-      defined $in or die "bug";
+      @lines= split /^/m, $$in;
    }
-   elsif (ref $in ne 'GLOB' && !(blessed($in) && $in->can('getline'))) {
-      open(my $fh, '<', $in) or croak "open($in): $!";
+   else {
+      my $fh;
+      if (ref $in eq 'GLOB' || (blessed($in) && $in->can('getline'))) {
+         $fh= $in;
+      } else {
+         open($fh, '<', $in) or croak "open($in): $!";
+      }
+      local $/= undef;
+      my $text= <$fh>;
       $filename //= "$in";
-      $in= $fh;
+      utf8::decode($text) or warn "$filename is not encoded as utf-8\n";
+      @lines= split /^/m, $text;
    }
-   my $line_ofs= $line? $line - 1 : 0;
+   $line //= 1;
    $self->{cpppp_parse}= {
       autocomma => 1,
       autostatementline => 1,
@@ -299,36 +305,35 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       }
       $cur_tpl= undef;
    };
-   while (<$in>) {
+   for (@lines) {
       if (/^#!/) { # ignore #!
       }
       elsif (/^##/) { # full-line of perl code
          if (defined $cur_tpl || !length $perl) {
             end_tpl();
-            $perl .= '# line '.($.+$line_ofs).qq{ "$filename"\n};
+            $perl .= qq{# line $line "$filename"\n};
          }
-         s/^##\s?//;
-         my $pl= $_;
-         $perl .= $self->_transform_template_perl($pl, $.+$line_ofs);
+         (my $pl= $_) =~ s/^##\s?//;
+         $perl .= $self->_transform_template_perl($pl, $line);
       }
       elsif (/^(.*?) ## ?((?:if|unless|for|while|unless) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
          end_tpl() if defined $cur_tpl;
-         $tpl_start_line= $. + $line_ofs;
+         $tpl_start_line= $line;
          $cur_tpl= $tpl;
          end_tpl();
          $perl =~ s/;\s*$//; # remove semicolon
          $pl .= ';' unless $pl =~ /;\s*$/; # re-add it if user didn't
-         $perl .= qq{\n# line }.($.+$line_ofs).qq{ "$filename"\n    $pl\n};
+         $perl .= qq{\n# line $line "$filename"\n    $pl\n};
       }
       else { # default is to assume a line of template
          if (!defined $cur_tpl) {
-            $tpl_start_line= $. + $line_ofs;
+            $tpl_start_line= $line;
             $cur_tpl= '';
          }
          $cur_tpl .= $_;
       }
-   }
+   } continue { ++$line }
    end_tpl() if defined $cur_tpl;
 
    # Resolve final bits of column tracking
@@ -538,6 +543,7 @@ Example:
 
 sub patch_file($self, $fname, $patch_markers, $new_content) {
    $new_content .= "\n" unless $new_content =~ /\n\Z/;
+   utf8::encode($new_content);
    open my $fh, '+<', $fname or die "open($fname): $!";
    my $content= do { local $/= undef; <$fh> };
    $content =~ s{(BEGIN \Q$patch_markers\E[^\n]*\n).*?(^[^\n]+?END \Q$patch_markers\E)}
@@ -548,6 +554,30 @@ sub patch_file($self, $fname, $patch_markers, $new_content) {
    $fh->truncate($fh->tell) or die "truncate: $!";
    $fh->close or die "close: $!";
    $self;
+}
+
+sub overwrite_file_with_backup($self, $fname, $new_content) {
+   $new_content .= "\n" unless $new_content =~ /\n\Z/;
+   utf8::encode($new_content);
+   if (-e $fname) {
+      my $n= 0;
+      ++$n while -e "$fname.$n";
+      require File::Copy;
+      File::Copy::copy($fname, "$fname.$n") or die "copy($fname, $fname.$n): $!";
+   }
+   open my $fh, '>', $fname or die "open($fname): $!";
+   $fh->print($new_content) or die "write: $!";
+   $fh->close or die "close: $!";
+   $self;
+}
+
+sub write_sections_to_file($self, $sections, $fname, $patch_markers=undef) {
+   my $content= $self->output->get($sections);
+   if (defined $patch_markers) {
+      $self->patch_file($fname, $patch_markers, $content);
+   } else {
+      $self->overwrite_file_with_backup($fname, $content);
+   }
 }
 
 sub _slurp_file($self, $fname) {

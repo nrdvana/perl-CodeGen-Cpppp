@@ -86,8 +86,8 @@ sub _gen_perl_scope_functions($class, $version) {
 }
 
 sub _parse_data($class) {
-   no strict 'refs';
    $class = ref $class if ref $class;
+   no strict 'refs';
    return ${"${class}::_parse_data"};
 }
 
@@ -104,7 +104,8 @@ sub new($class, @args) {
          elsif ($p eq '%') { ref $attrs{$_} eq 'HASH' or croak("Expected HASH for parameter $_"); }
       }
       else {
-         croak("Unknown parameter '$_' to template $parse->{filename}");
+         croak("Unknown parameter '$_' to template $parse->{filename}")
+            unless $class->can($_);
       }
    }
 
@@ -118,6 +119,26 @@ sub new($class, @args) {
    $self;
 }
 
+sub coerce_parameters($class, $params) {
+   my %ret;
+   my $parse= $class->_parse_data;
+   for my $k (keys $parse->{template_parameter}->%*) {
+      my $p= $parse->{template_parameter}{$k};
+      my $v= $params->{$p.$k} // $params->{$k};
+      next unless defined $v;
+      if ($p eq '@') {
+         $v= ref $v eq 'HASH'? [ keys %$v ] : [ $v ]
+            unless ref $v eq 'ARRAY';
+      } elsif ($p eq '%') {
+         # If it isn't a hash, treat it like a list that needs added to a set
+         $v= { map +($_ => 1), ref $v eq 'ARRAY'? @$v : ($v) }
+            unless ref $v eq 'HASH';
+      }
+      $ret{$k}= $v;
+   }
+   \%ret;
+}
+
 sub current_output_section($self, $new=undef) {
    if (defined $new) {
       $self->output->has_section($new)
@@ -128,9 +149,13 @@ sub current_output_section($self, $new=undef) {
    $self->{current_output_section};
 }
 
-sub output($self) {
+sub flush($self) {
    $self->_finish_render;
-   $self->{output};
+   $self;
+}
+
+sub output($self) {
+   $self->flush->{output};
 }
 
 sub _init_param($self, $name, $ref, @initial_value) {

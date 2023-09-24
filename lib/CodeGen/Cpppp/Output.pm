@@ -139,6 +139,38 @@ sub prepend($self, $section, @code) {
    unshift @{$self->{out}{$section}}, @code;
 }
 
+=head2 expand_section_selector
+
+Expands the following patterns:
+
+  'public', ['protected']  =>  ( 'public', 'protected' )
+  "public,private"         =>  ( 'public', 'private' )
+  "public..private"        =>  ( 'public', 'protected', 'private' )
+
+returning the list in priority order.
+  
+=cut
+
+sub expand_section_selector($self, @list) {
+   @list= map +(ref $_ eq 'ARRAY'? @$_ : $_), @list;
+   @list= map split(',', $_), @list;
+   my $sec_pri= $self->section_priority;
+   my %seen;
+   for (@list) {
+      if (/([^.]+)\.\.([^.]+)/) {
+         my $low= $sec_pri->{$1} // croak "Unknown section $1";
+         my $high= $sec_pri->{$2} // croak "Unknown section $2";
+         for (keys %$sec_pri) {
+            $seen{$_}++ if $sec_pri->{$_} >= $low && $sec_pri->{$_} <= $high;
+         }
+      } else {
+         $sec_pri->{$_} // croak "Unknown section $_";
+         $seen{$_}++;
+      }
+   }
+   sort { $sec_pri->{$a} <=> $sec_pri->{$b} } keys %seen;
+}
+
 =head2 get
 
   $all= $out->get;
@@ -148,30 +180,23 @@ sub prepend($self, $section, @code) {
 Collect the output from all or specified sections.  An empty list returns all
 sections.  The special notation '..' returns a range of sections, inclusive.
 
+=head2 consume
+
+Same as L</get> but removes the content it returns.  The sections remain
+defined, but empty.
+
 =cut
 
 sub get($self, @sections) {
-   my @sec;
-   my $sec_pri= $self->section_priority;
-   if (@sections) {
-      my %s;
-      for (@sections) {
-         if (/([^.]+)\.\.([^.]+)/) {
-            my $low= $sec_pri->{$1} // croak "Unknown section $1";
-            my $high= $sec_pri->{$2} // croak "Unknown section $2";
-            for (keys %$sec_pri) {
-               $s{$_}++ if $sec_pri->{$_} >= $low && $sec_pri->{$_} <= $high;
-            }
-         } else {
-            $sec_pri->{$_} // croak "Unknown section $_";
-            $s{$_}++;
-         }
-      }
-      @sec= sort { $sec_pri->{$a} <=> $sec_pri->{$b} } keys %s;
-   } else {
-      @sec= sort { $sec_pri->{$a} <=> $sec_pri->{$b} } keys %{ $self->{out} };
-   }
+   my @sec= @sections? $self->expand_section_selector(@sections) : $self->section_list;
    join '', map @{$self->{out}{$_} // []}, @sec;
+}
+
+sub consume($self, @sections) {
+   my @sec= @sections? $self->expand_section_selector(@sections) : $self->section_list;
+   my $out= join '', map @{delete $self->{out}{$_} // []}, @sec;
+   @{$self->{out}{$_}}= () for @sec;
+   $out
 }
 
 1;
