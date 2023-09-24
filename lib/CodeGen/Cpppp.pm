@@ -143,41 +143,6 @@ sub new($class, @attrs) {
 
 =head1 METHODS
 
-=head2 process
-
-  $cpppp->process($filename);
-  $cpppp->process($handle, $filename, $line_offset);
-
-Process one template, according to L</action>.  The parameters are the same as
-for L</parse_cpppp>.
-
-=cut
-
-sub process($self, @input_args) {
-   my $m= $self->can('_process__'.$self->action)
-      or croak "Undefined action '".$self->action."'";
-   $self->$m(@input_args);
-}
-sub _process__render($self, @input_args) {
-   my $pkg= $self->compile_cpppp(@input_args);
-   my $params= $pkg->coerce_parameters($self->params);
-   $params->{output}= $self->output;
-   my $tpl= $pkg->new($params);
-   # tpl already wrote to ->output
-}
-sub _process__dump_template_perl($self, @input_args) {
-   my $parse= $self->parse_cpppp(@input_args);
-   $self->output->declare_section('template_perl');
-   my $code= $self->_gen_perl_template_package($parse);
-   require Data::Dumper;
-   my $dumper= Data::Dumper->new([ { %$parse, code => '...' } ], [ '$_parse_data' ])
-      ->Indent(1)->Sortkeys(1);
-   my $ofs= index($code, "\nsub BUILD")+1;
-   $self->output->append(template_perl => substr($code, 0, $ofs) . "our \$_parse_data;\n");
-   $self->output->append(template_perl => $dumper->Dump);
-   $self->output->append(template_perl => substr($code, $ofs));
-}
-
 =head2 require_template
 
   $cpppp->require_template
@@ -504,11 +469,10 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
       else { # Perl expression
          my $expr= substr($text, $s->{pos}, $s->{len});
          # Special case: ${{  }} notation is a shortcut for @{[do{ ... }]}
-         if ($expr =~ /^ \$\{\{ (.*) \}\} $/x) {
-            $s->{eval}= $1;
-         } else {
-            $s->{eval}= $expr; # Will need to be filled in with a coderef
-         }
+         $expr =~ s/^ \$\{\{ (.*) \}\} $/$1/x;
+         # When not inside a string, ${foo} becomes ambiguous with ${foo()}
+         $expr =~ s/^ ([\$\@]) \{ ([\w_]+) \} /$1$2/x;
+         $s->{eval}= $expr;
          $prev_eval= $s;
       }
    }
