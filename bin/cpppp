@@ -147,8 +147,7 @@ sub dump_template_perl(@input_args) {
 sub render(@input_args) {
    my $tpl_class= $cpppp->compile_cpppp(@input_args);
    my $tpl_params= $tpl_class->coerce_parameters(\%param);
-   $tpl_params->{output}= $cpppp->output;
-   $tpl_class->new($tpl_params)->flush;
+   $cpppp->new_template($tpl_class, $tpl_params)->flush;
 }
 
 my $action= $opt_dump_pl? \&dump_template_perl : \&render;

@@ -76,10 +76,10 @@ sub _setup_derived_package($class, $pkg, $version) {
 sub _gen_perl_scope_functions($class, $version) {
    return (
       '# line '. __LINE__ . ' "' . __FILE__ . '"',
-      'my sub param { $self->_init_param(@_) }',
-      'my sub define($name, $replacement){ $self->define_template_macro($name, $replacement) }',
-      'my sub section($name){ $self->current_output_section($name) }',
-      'my sub template($name){ $self->require_template($name) }',
+      'my sub param { unshift @_, $self; goto $self->can("_init_param") }',
+      'my sub define { unshift @_, $self; goto $self->can("define_template_macro") }',
+      'my sub section { unshift @_, $self; goto $self->can("current_output_section") }',
+      'my sub template { unshift @_, $self->context; goto $self->context->can("new_template") }',
       'my $trim_comma= CodeGen::Cpppp::AntiCharacter->new(qr/,/, qr/\s*/);',
       'my $trim_ws= CodeGen::Cpppp::AntiCharacter->new(qr/\s*/);',
    );
@@ -90,6 +90,8 @@ sub _parse_data($class) {
    no strict 'refs';
    return ${"${class}::_parse_data"};
 }
+
+sub context { $_[0]{context} }
 
 sub new($class, @args) {
    no strict 'refs';
@@ -110,11 +112,16 @@ sub new($class, @args) {
    }
 
    my $self= bless {
-      (map +($_ => $parse->{$_}), qw( autocomma autoindent autostatementline )),
+      (map +($_ => $parse->{$_}), qw(
+         autocomma autoindent autostatementline autocolumn
+         context
+      )),
       output => CodeGen::Cpppp::Output->new,
       current_output_section => 'private',
       %attrs,
    }, $class;
+   Scalar::Util::weaken($self->{context})
+      if $self->{context};
    $self->BUILD(\%attrs);
    $self;
 }

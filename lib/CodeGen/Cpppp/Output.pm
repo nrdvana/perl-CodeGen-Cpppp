@@ -108,6 +108,7 @@ sub declare_sections($self, @list) {
       if (looks_like_number($list[0])) {
          $pri->{$name}= shift @list;
       } elsif (!defined $pri->{$name}) {
+         $name =~ /\.\.|,/ and croak "Section names may not contain '..' or ','";
          $pri->{$name}= $next++;
       }
    }

@@ -114,6 +114,53 @@ Directly perform the work of inlining one function into another.
 
 =head1 ATTRIBUTES
 
+=head2 autocomma
+
+Default value for new templates; determines whether expansion of an array
+variable will automatically join with commas depending on the surrounding
+generated C code.
+
+=head2 autostatementline
+
+Default value for new templates; determines whether expansion of an array
+variable in statement context automatically joins them with a semicolon and
+line feed.
+
+=head2 autoindent
+
+Default value for new templates; determines whether embedded newlines inside
+variables that expand in the source code will automatically have indent applied.
+
+=head2 autocolumn
+
+Default value for new templates; enables the feature that detects column layout
+in the source template, and attempts to line up those same elements in the
+output after variables have been expanded.
+
+=cut
+
+sub autocomma($self, $newval=undef) {
+   $self->{autocomma}= $newval if defined $newval;
+   $self->{autocomma} // 1;
+}
+sub autostatementline($self, $newval=undef) {
+   $self->{autostatementline}= $newval if defined $newval;
+   $self->{autostatementline} // 1;
+}
+sub autoindent($self, $newval=undef) {
+   $self->{autoindent}= $newval if defined $newval;
+   $self->{autoindent} // 1;
+}
+sub autocolumn($self, $newval=undef) {
+   $self->{autocolumn}= $newval if defined $newval;
+   $self->{autocolumn} // 1;
+}
+
+=head2 include_path
+
+An arrayref of directories to search for template files during
+C<require_template>.
+
 =head2 output
 
 An instance of L<CodeGen::Cpppp::Output> that is used as the default C<output>
@@ -122,7 +169,8 @@ output.
 
 =cut
 
-sub output { $_[0]{output} }
+sub include_path { $_[0]{include_path} //= [] }
+sub output { $_[0]{output} //= CodeGen::Cpppp::Output->new }
 
 =head1 CONSTRUCTOR
 
@@ -133,25 +181,78 @@ Bare-bones for now, it accepts whatever hash values you hand to it.
 =cut
 
 sub new($class, @attrs) {
-   bless {
-      output => CodeGen::Cpppp::Output->new,
+   my $self= bless {
       @attrs == 1 && ref $attrs[0]? %{$attrs[0]}
       : !(@attrs&1)? @attrs
       : croak "Expected even-length list or hashref"
    }, $class;
+   $self->{include_path}= [ $self->{include_path} ]
+      if defined $self->{include_path} && ref $self->{include_path} ne 'ARRAY';
+   $self;
 }
 
 =head1 METHODS
 
 =head2 require_template
 
-  $cpppp->require_template
+  $tpl_class= $cpppp->require_template($filename);
+
+Load a template from a file, and die if not found or if it fails to compile.
+Subsequent loads of the same file return the same class.
   
 =cut
 
 sub require_template($self, $filename) {
-   my $abs_path= abs_path($filename);
-   $self->{templates}{$abs_path} ||= $self->compile_template($filename);
+   $self->{templates}{$filename} ||= do {
+      my $path= $self->find_template($filename)
+         or croak("No template '$filename' found");
+      $self->{templates}{$path} ||= $self->compile_cpppp($path);
+   }
+}
+
+=head2 find_template
+
+  $abs_path= $cpppp->find_template($filename);
+
+Check the filename itself, and relative to all paths in L</include_path>,
+and return the absolute path to the first match.
+
+=cut
+
+sub find_template($self, $filename) {
+   return abs_path($filename) if $filename =~ m,/, and -e $filename;
+   # /foo ./foo and ../foo do not trigger a path search
+   return undef if $filename =~ m,^\.?\.?/,;
+   for ($self->include_path->@*) {
+      my $p= "$_/$filename";
+      $p =~ s,//,/,g; # in case include-path ends with '/'
+      return abs_path($p) if -e $p;
+   }
+   return undef;
+}
+
+=head2 new_template
+
+  $tpl_instance= $cpppp->new_template($class_or_filename, %params);
+
+Load a template by filename (or use an already-loaded class) and construct a
+new instance using C<%params> but also with the context and output defaulting
+to this C<$cpppp> instance, and return the template object.
+
+=cut
+
+sub new_template($self, $class_or_filename, @params) {
+   my $class= $class_or_filename =~ /^CodeGen::Cpppp::/ && $class_or_filename->can('new')
+      ? $class_or_filename
+      : $self->require_template($class_or_filename);
+   my %params= (
+      context => $self,
+      output => $self->output,
+      !(@params&1)? @params
+      : 1 == @params && ref $params[0] eq 'HASH'? %{$params[0]}
+      : croak("Expected even-length key/val list, or hashref"),
+   );
+   $class->new(\%params);
 }
 
 =head2 compile_cpppp
@@ -252,13 +353,13 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
    }
    $line //= 1;
    $self->{cpppp_parse}= {
-      autocomma => 1,
-      autostatementline => 1,
-      autoindent => 1,
-      autocolumn => 1,
-      filename => $filename,
-      colmarker => {},
-      coltrack => { },
+      autocomma         => $self->autocomma,
+      autostatementline => $self->autostatementline,
+      autoindent        => $self->autoindent,
+      autocolumn        => $self->autocolumn,
+      filename          => $filename,
+      colmarker         => {},
+      coltrack          => { },
    };
    my ($perl, $block_group, $tpl_start_line, $cur_tpl)= ('', 1);
    my sub end_tpl {
