@@ -227,7 +227,7 @@ sub _render_code_block {
    my ($self, $i, @expr_subs)= @_;
    my $block= $self->_parse_data->{code_block_templates}[$i];
    my $text= $block->{text};
-   my $newtext= '';
+   my $out= \($self->{current_out} //= '');
    my $at= 0;
    my %colmarker;
    my $prev_colmark;
@@ -235,10 +235,10 @@ sub _render_code_block {
    my $subst= $block->{subst};
    for (my $i= 0; $i < @$subst; $i++) {
       my $s= $subst->[$i];
-      $newtext .= substr($text, $at, $s->{pos} - $at);
+      $$out .= substr($text, $at, $s->{pos} - $at);
       if ($s->{colgroup}) {
          my $mark= $colmarker{$s->{colgroup}} //= _colmarker($s->{colgroup});
-         $newtext .= $mark;
+         $$out .= $mark;
          $prev_colmark= $s;
          $self->{current_out_colgroup_state}{$s->{colgroup}}= $s->{last}? 2 : 1;
       }
@@ -247,16 +247,16 @@ sub _render_code_block {
             or die;
          # Avoid using $_ up to this point so that $_ pases through
          # from the surrounding code into the evals
-         my @out= $fn->($self, \$newtext);
+         my @out= $fn->($self, $out);
          # Expand arrayref and coderefs in the returned list
          @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
-         ref eq 'CODE' && ($_= $_->($self, \$newtext)) for @out;
+         ref eq 'CODE' && ($_= $_->($self, $out)) for @out;
          @out= grep defined, @out;
          # Now decide what to join them with.
          my $join_sep= $";
          my $indent= '';
-         my ($last_char)= ($newtext =~ /(\S) (\s*) \Z/x);
-         my $cur_line= substr($newtext, rindex($newtext, "\n")+1);
+         my ($last_char)= ($$out =~ /(\S) (\s*) \Z/x);
+         my $cur_line= substr($$out, rindex($$out, "\n")+1);
          my $inline= $cur_line =~ /\S/;
          if ($self->{autoindent}) {
             ($indent= $cur_line) =~ s/\S/ /g;
@@ -272,19 +272,25 @@ sub _render_code_block {
                # If no items, or the first nonwhitespace character is a comma,
                # remove the previous comma
                if (!@out || $out[0] =~ /^\s*,/) {
-                  $newtext =~ s/,(\s*)\Z/$1/;
+                  $$out =~ s/,(\s*)\Z/$1/;
                }
-            } elsif ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')) {
+            } elsif ($self->{autostatementline} && $inline
+               && substr($text, $s->{pos}+$s->{len}, 1) eq ';'
+               && ($last_char eq '{' || $last_char eq ';')
+            ) {
+               $join_sep= "; ";
                @out= grep /\S/, @out; # remove items that are only whitespace
-               if ($inline) {
-                  $join_sep= "; ";
-               } else {
-                  $join_sep= "\n";
-                  # for line-array expansion, want semicolons on each regardless of join
-                  $_ .= ";" for @out;
-                  # If no elements, and only whitespace to the left, remove the whole line.
-                  push @out, CodeGen::Cpppp::AntiCharacter->new(qr/\s*/)
-                     unless @out;
+            }
+            elsif ($self->{autostatementline} && !$inline
+               && substr($text, $s->{pos}+$s->{len}, 2) eq ";\n"
+               && ($last_char eq '{' || $last_char eq ';')
+            ) {
+               $join_sep= ";\n";
+               # If no elements, remove the whole line.
+               if (!@out) {
+                  $$out =~ s/[ \t]+\Z//;
+                  $at= $s->{pos} + $s->{len} + 2;
+                  next;
                }
             } elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
                $join_sep .= "\n";
@@ -298,12 +304,12 @@ sub _render_code_block {
             if ($self->{autoindent} && $indent) {
                $str =~ s/\n/\n$indent/g;
             }
-            $newtext .= $str;
+            $$out .= $str;
          }
       }
       $at= $s->{pos} + $s->{len};
    }
-   ($self->{current_out} //= '') .= $newtext . substr($text, $at);
+   $$out .= substr($text, $at);
 }
 
 1;

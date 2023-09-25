@@ -23,7 +23,7 @@ my @tests= (
                          parent,   ## if $feature_parent;
                          count,    ## if $feature_count;
                          $trim_comma $trim_ws;
-          @extra_node_fields
+          @extra_node_fields;
       };
       ## }
       C
@@ -87,7 +87,7 @@ my @tests= (
       code => <<~'C', file => __FILE__, line => __LINE__,
       ## my @stmt= qw( x++ y-- );
       if (x) {
-         @stmt
+         @stmt;
       }
       C
       expect => <<~'C'
