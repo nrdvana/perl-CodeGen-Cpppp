@@ -1,3 +1,12 @@
+0.001_04 - 2023-09-25
+  - template parameters, assignable from cli
+  - output file patching, configurable from cli
+  - call templates from templates, and cache based on filename
+  - template include path
+  - numerous improvements to autoformatting features, and can
+     now span blocks
+  - AntiCharacter objects
+
 0.001_03 - 2023-09-20
   - Construct perl classes from each template
   - Special cases for '@' substitutions: 'autocomma', 'autostatementline'

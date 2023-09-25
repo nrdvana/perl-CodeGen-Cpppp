@@ -44,7 +44,7 @@ B<Input:>
                    parent,   ## if $feature_parent;
                    count,    ## if $feature_count;
                    $trim_comma $trim_ws;
-    @extra_node_fields
+    @extra_node_fields;
   };
   ## }
 
