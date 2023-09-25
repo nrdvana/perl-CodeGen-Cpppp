@@ -276,7 +276,16 @@ sub _render_code_block {
                }
             } elsif ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')) {
                @out= grep /\S/, @out; # remove items that are only whitespace
-               $join_sep= $inline? "; " : ";\n";
+               if ($inline) {
+                  $join_sep= "; ";
+               } else {
+                  $join_sep= "\n";
+                  # for line-array expansion, want semicolons on each regardless of join
+                  $_ .= ";" for @out;
+                  # If no elements, and only whitespace to the left, remove the whole line.
+                  push @out, CodeGen::Cpppp::AntiCharacter->new(qr/\s*/)
+                     unless @out;
+               }
             } elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
                $join_sep .= "\n";
             }

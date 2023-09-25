@@ -34,6 +34,7 @@ B<Input:>
   ## param $max_bits = 16;
   ## param $feature_parent = 0;
   ## param $feature_count = 0;
+  ## param @extra_node_fields;
   ##
   ## for (my $bits= $min_bits; $bits <= $max_bits; $bits <<= 1) {
   struct tree_node_$bits {
@@ -43,6 +44,7 @@ B<Input:>
                    parent,   ## if $feature_parent;
                    count,    ## if $feature_count;
                    $trim_comma $trim_ws;
+    @extra_node_fields
   };
   ## }
 
@@ -58,21 +60,6 @@ B<Output:>
              color:  1,
              right: 15;
   };
-
-B<Input:>
-
-  ## my @extra_args;
-  extern int fn( char *format, @extra_args );
-  ## for ('int a', 'int b') {
-  ##   push @extra_args, $_;
-  extern int fn_$_( char *format, @extra_args );
-  ## }
-
-B<Output:>
-
-  extern int fn( char *format  );
-  extern int fn_a( char *format, int a );
-  extern int fn_b( char *format, int a, int b );
 
 =head1 DESCRIPTION
 

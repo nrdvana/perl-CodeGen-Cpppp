@@ -13,6 +13,7 @@ my @tests= (
       ## param $max_bits = 16;
       ## param $feature_parent = 0;
       ## param $feature_count = 0;
+      ## param @extra_node_fields;
       ##
       ## for (my $bits= $min_bits; $bits <= $max_bits; $bits <<= 1) {
       struct tree_node_$bits {
@@ -22,6 +23,7 @@ my @tests= (
                          parent,   ## if $feature_parent;
                          count,    ## if $feature_count;
                          $trim_comma $trim_ws;
+          @extra_node_fields
       };
       ## }
       C
@@ -85,7 +87,7 @@ my @tests= (
       code => <<~'C', file => __FILE__, line => __LINE__,
       ## my @stmt= qw( x++ y-- );
       if (x) {
-         @stmt;
+         @stmt
       }
       C
       expect => <<~'C'
