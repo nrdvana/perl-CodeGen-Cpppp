@@ -3,11 +3,16 @@ use Test2::V0;
 use CodeGen::Cpppp;
 use Data::Printer;
 
+# Perl didn't get <<~'x' until 5.28
+sub unindent {
+   my ($indent)= ($_[0] =~ /^(\s+)/);
+   $_[0] =~ s/^$indent//mgr;
+}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
    {  name => "loop, tpl, indent",
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C') , file => __FILE__, line => __LINE__,
       #! /usr/bin/env cpppp
       ## param $min_bits = 8;
       ## param $max_bits = 16;
@@ -26,8 +31,8 @@ my @tests= (
           @extra_node_fields;
       };
       ## }
-      C
-      expect => <<~'C',
+C
+      expect => unindent(<<'C'),
       struct tree_node_8 {
           uint8_t  left :  7,
                    color:  1,
@@ -38,82 +43,91 @@ my @tests= (
                    color:  1,
                    right: 15;
       };
-      C
+C
    },
    {  name => 'indent double expansion',
-      code => <<~'C', file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my $NAMESPACE= 'x';
       ## for my $bits (8, 16) {
       #define ${NAMESPACE}_MAX_TREE_HEIGHT_$bits  ${{2*($bits-1)+1}}
       #define ${NAMESPACE}_MAX_ELEMENTS_$bits     0x${{sprintf "%X", 2**($bits-1)-1}}
       ## }
-      C
-      expect => <<~'C',
+C
+      expect => unindent(<<'C'),
       #define x_MAX_TREE_HEIGHT_8      15
       #define x_MAX_ELEMENTS_8       0x7F
       #define x_MAX_TREE_HEIGHT_16     31
       #define x_MAX_ELEMENTS_16    0x7FFF
-      C
+C
    },
    {  name => 'anticomma',
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my @x= qw( a b c d e f );
       ## local $"= ',';
       ## my $y= '';
       void fn(@x,$y $trim_comma)
-      C
+C
       expect => "void fn(a, b, c, d, e, f )\n",
    },
    {  name => "user function",
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my $y= 2;
       ## sub example($x) {
       ##   $x*$x/$y
       ## }
       got ${{example(8)}}
-      C
+C
       expect => "got 32\n",
    },
    {  name => "list autocomma",
-      code => <<~'C', file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my @x= qw( a b c );
       foo(@x);
       ## @x= ();
       foo(1,2,@x);
-      C
+C
       expect => "foo(a, b, c);\nfoo(1,2);\n"
    },
+   {  name => "initializer autocomma",
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
+      ## my @x= qw( 1 2 3 4 );
+      ## my @y= ();
+      int x[]= { @x };
+      int y[]= { @y };
+C
+      expect => "int x[]= { 1, 2, 3, 4 };\nint y[]= {  };\n"
+   },
    {  name => "list autostatement autoindent",
-      code => <<~'C', file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my @stmt= qw( x++ y-- );
       if (x) {
          @stmt;
       }
-      C
-      expect => <<~'C'
+C
+      expect => unindent(<<'C')
       if (x) {
          x++;
          y--;
       }
-      C
+C
    },
    {  name => 'auto indent after expansion',
-      code => <<~'C', file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## my @fields= qw( x y z );
       ## my $float_t= 'double';
       struct Foo {
          $float_t  scale,
                    @fields;
       };
-      C
-      expect => <<~'C'
+C
+      expect => unindent(<<'C')
       struct Foo {
          double scale,
                 x,
                 y,
                 z;
       };
-      C
+C
    },
 );
 

@@ -3,15 +3,20 @@ use Test2::V0;
 use CodeGen::Cpppp;
 use Data::Printer;
 
+# Perl didn't get <<~'x' until 5.28
+sub unindent {
+   my ($indent)= ($_[0] =~ /^(\s+)/);
+   $_[0] =~ s/^$indent//mgr;
+}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
    {  name => "scalar",
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## param $x= 10;
       $x
       ## $x= 7;
-      C
+C
       tests => [
          { params => {},             expect => "10\n", final => 7, name => 'x default' },
          { params => { x => undef }, expect => "\n",   final => 7, name => 'x=undef' },
@@ -19,11 +24,11 @@ my @tests= (
       ]
    },
    { name => 'array',
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## param @x= ( 1, 2, 3 );
       (@x)
       ## @x= (7);
-      C
+C
       tests => [
          { params => {},             expect => "(1, 2, 3)\n", final => [7], name => 'x default' },
          { params => { x => undef }, error => qr/array/i,                   name => 'x=undef' },
@@ -31,11 +36,11 @@ my @tests= (
       ]
    },
    { name => 'hash',
-      code => <<~'C' , file => __FILE__, line => __LINE__,
+      code => unindent(<<'C'), file => __FILE__, line => __LINE__,
       ## param %x= ( a => 1 );
       $_: $x{$_} ## for sort keys %x;
       ## %x= ( a => 7 );
-      C
+C
       tests => [
          { params => {},                  expect => "a: 1\n",       final => {a=>7}, name => 'x default' },
          { params => { x => undef },      error => qr/hash/i,                        name => 'x=undef' },

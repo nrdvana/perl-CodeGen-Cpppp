@@ -3,15 +3,20 @@ use Test2::V0;
 use CodeGen::Cpppp;
 use Data::Printer;
 
+# Perl didn't get <<~'x' until 5.28
+sub unindent {
+   my ($indent)= ($_[0] =~ /^(\s+)/);
+   $_[0] =~ s/^$indent//mgr;
+}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
    {  name => "basic substitutions",
-      code => <<~'C' ,
+      code => unindent(<<'C'),
       void Example$foo {
          int i= ${{ 1+1 }};
       }
-      C
+C
       expect => {
          subst => [
             { pos => 12, len => 4, line => 1 },
@@ -20,10 +25,10 @@ my @tests= (
       }
    },
    {  name => "basic column",
-      code => <<~'C' ,
+      code => unindent(<<'C'),
       int     x;
       $el_t*  y;
-      C
+C
       expect => {
          subst => [
             { pos =>  8, len => 0, colgroup => 80001, follows_eval => F, line => 1 },

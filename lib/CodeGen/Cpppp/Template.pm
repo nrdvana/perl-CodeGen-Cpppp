@@ -236,6 +236,7 @@ sub _render_code_block {
    for (my $i= 0; $i < @$subst; $i++) {
       my $s= $subst->[$i];
       $$out .= substr($text, $at, $s->{pos} - $at);
+      $at= $s->{pos} + $s->{len};
       if ($s->{colgroup}) {
          my $mark= $colmarker{$s->{colgroup}} //= _colmarker($s->{colgroup});
          $$out .= $mark;
@@ -264,35 +265,31 @@ sub _render_code_block {
          # Special handling if the user requested a list substitution
          if (ord $s->{eval} == ord '@') {
             $last_char= '' unless defined $last_char;
-            if ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(')) {
-               if (@out) {
-                  $join_sep= $inline? ', ' : ",\n";
-                  @out= grep /\S/, @out; # remove items that are only whitespace
+            if ($self->{autostatementline} && ($last_char eq '{' || $last_char eq ';')
+               && substr($text, $s->{pos}+$s->{len}, 1) eq ';'
+            ) {
+               @out= grep /\S/, @out; # remove items that are only whitespace
+               if (!$inline && substr($text, $s->{pos}+$s->{len}, 2) eq ";\n") {
+                  $join_sep= ";\n";
+                  # If no elements, remove the whole line.
+                  if (!@out) {
+                     $$out =~ s/[ \t]+\Z//;
+                     $at+= 2; # skip over ";\n"
+                  }
+               } else {
+                  $join_sep= "; ";
                }
+            }
+            elsif ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(' || $last_char eq '{')) {
+               @out= grep /\S/, @out; # remove items that are only whitespace
+               $join_sep= $inline? ', ' : ",\n";
                # If no items, or the first nonwhitespace character is a comma,
                # remove the previous comma
                if (!@out || $out[0] =~ /^\s*,/) {
                   $$out =~ s/,(\s*)\Z/$1/;
                }
-            } elsif ($self->{autostatementline} && $inline
-               && substr($text, $s->{pos}+$s->{len}, 1) eq ';'
-               && ($last_char eq '{' || $last_char eq ';')
-            ) {
-               $join_sep= "; ";
-               @out= grep /\S/, @out; # remove items that are only whitespace
             }
-            elsif ($self->{autostatementline} && !$inline
-               && substr($text, $s->{pos}+$s->{len}, 2) eq ";\n"
-               && ($last_char eq '{' || $last_char eq ';')
-            ) {
-               $join_sep= ";\n";
-               # If no elements, remove the whole line.
-               if (!@out) {
-                  $$out =~ s/[ \t]+\Z//;
-                  $at= $s->{pos} + $s->{len} + 2;
-                  next;
-               }
-            } elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
+            elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
                $join_sep .= "\n";
             }
          }
@@ -307,7 +304,6 @@ sub _render_code_block {
             $$out .= $str;
          }
       }
-      $at= $s->{pos} + $s->{len};
    }
    $$out .= substr($text, $at);
 }
