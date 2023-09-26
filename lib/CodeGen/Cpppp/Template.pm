@@ -1,7 +1,7 @@
 package CodeGen::Cpppp::Template;
 
 # VERSION
-# ABSTRACT: Template objects created by parsing and compiling cpppp
+# ABSTRACT: Parent of template classes created by parsing and compiling cpppp
 
 use v5.20;
 use warnings;
@@ -13,6 +13,29 @@ use CodeGen::Cpppp::Output;
 use CodeGen::Cpppp::AntiCharacter;
 use Exporter ();
 require version;
+
+=head1 DESCRIPTION
+
+This is the base class for all Template classes compiled from cpppp source.
+It also defines the exports that set up the scope for evaluating the template.
+
+=head1 EXPORTS
+
+=over
+
+=item C<-setup>
+
+Initializes @ISA to CodeGen::Cpppp::Template (unless it was already initialized)
+and sets the compiler flags for strict, warnings, utf8, lexical_subs, signatures,
+and postderef.
+
+=item C<:v0>
+
+Exports symbols C<PUBLIC>, C<PROTECTED>, C<PRIVATE>
+
+=back
+
+=cut
 
 use constant {
    PUBLIC     => 'public',
@@ -75,7 +98,7 @@ sub _setup_derived_package($class, $pkg, $version) {
 
 sub _gen_perl_scope_functions($class, $version) {
    return (
-      '# line '. __LINE__ . ' "' . __FILE__ . '"',
+      '# line '. (__LINE__+1) . ' "' . __FILE__ . '"',
       'my sub param { unshift @_, $self; goto $self->can("_init_param") }',
       'my sub define { unshift @_, $self; goto $self->can("define_template_macro") }',
       'my sub section { unshift @_, $self; goto $self->can("current_output_section") }',
@@ -85,13 +108,59 @@ sub _gen_perl_scope_functions($class, $version) {
    );
 }
 
+=head1 ATTRIBUTES
+
+=head2 context
+
+Weak-reference to the instance of C<CodeGen::Cpppp> which created this template,
+if any.  This is automatically set by L<CodeGen::Cpppp/new_template>. Read-only.
+
+=head2 output
+
+Instance of L<CodeGen::Cpppp::Output>.  Read-only.
+
+=head2 current_output_section
+
+Name of the section of output being written.  Read-write.
+
+=cut
+
+sub context { $_[0]{context} }
+
+sub output { $_[0]->flush->{output} }
+
+sub current_output_section($self, $new=undef) {
+   if (defined $new) {
+      $self->output->has_section($new)
+         or croak "No defined output section '$new'";
+      $self->_finish_render;
+      $self->{current_output_section}= $new;
+   }
+   $self->{current_output_section};
+}
+
 sub _parse_data($class) {
    $class = ref $class if ref $class;
    no strict 'refs';
    return ${"${class}::_parse_data"};
 }
 
-sub context { $_[0]{context} }
+=head1 CONSTRUCTOR
+
+  $tpl= $template_class->new(%params, %attrs);
+
+The constructor takes object attributes I<and> user-defined template parameters.
+When specifying values for parameters, the type of the value must match the
+variable-type of the parameter, such as '@array' variables needing arrayref
+values.
+
+Running the constructor immediately executes the body of the user's template,
+which may initialize variables and define subroutines, and likely also generate
+output.  The subs declared in the template are then exposed as methods of this
+object.  Calling those methods may generate additional output, which is all
+collected in the L</output> object.
+
+=cut
 
 sub new($class, @args) {
    no strict 'refs';
@@ -126,6 +195,21 @@ sub new($class, @args) {
    $self;
 }
 
+=head1 METHODS
+
+=head2 coerce_parameters
+
+  my $params= $tpl_class->coerce_parameters(\%params);
+
+Given a hashref of potential parameter values, select and coerce the ones to
+match the actual parameters of this template.  The keys of this hashref may be
+either the bare name of the parameter, or the name-with-sigil.  This allows you
+to specify C<< { '$x' => $scalar, '@x' => \@arrayref } >> and for some parameter
+named 'x' this method will select the one whose type matches rather than
+attempting to coerce the value.
+
+=cut
+
 sub coerce_parameters($class, $params) {
    my %ret;
    my $parse= $class->_parse_data;
@@ -144,25 +228,6 @@ sub coerce_parameters($class, $params) {
       $ret{$k}= $v;
    }
    \%ret;
-}
-
-sub current_output_section($self, $new=undef) {
-   if (defined $new) {
-      $self->output->has_section($new)
-         or croak "No defined output section '$new'";
-      $self->_finish_render;
-      $self->{current_output_section}= $new;
-   }
-   $self->{current_output_section};
-}
-
-sub flush($self) {
-   $self->_finish_render;
-   $self;
-}
-
-sub output($self) {
-   $self->flush->{output};
 }
 
 sub _init_param($self, $name, $ref, @initial_value) {
@@ -185,9 +250,36 @@ sub _init_param($self, $name, $ref, @initial_value) {
    $ref;
 }
 
+=head2 flush
+
+Make sure all output is written to the L</output> object.  Some output is
+buffered internally so that formatting (like autoindent) can be applied when
+a code block is complete.
+
+=cut
+
+sub flush($self) {
+   $self->_finish_render;
+   $self;
+}
+
+=head2 define_template_macro
+
+This is called during the template constructor to bind a user-defined macro
+to the lexical sub that implements it for this template instance.
+
+=cut
+
 sub define_template_macro($self, $name, $code) {
    $self->{template_macro}{$name}= $code;
 }
+
+=head2 define_template_method
+
+This is called during the template constructor to bind the lexical subs of the
+template to methods of the object being created.
+
+=cut
 
 sub define_template_method($self, $name, $code) {
    $self->{template_method}{$name}= $code;

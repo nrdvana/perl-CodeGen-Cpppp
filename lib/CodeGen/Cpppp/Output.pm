@@ -1,11 +1,14 @@
 package CodeGen::Cpppp::Output;
-$INC{'CodeGen/Cpppp/Output.pm'}= 1;
+
+# VERSION
+# ABSTRACT: Collect text output into named sections
+
 use v5.20;
 use warnings;
+use experimental 'signatures', 'postderef';
 use Carp;
 use Scalar::Util 'looks_like_number';
 use List::Util 'max';
-use experimental 'signatures';
 
 =head1 DESCRIPTION
 

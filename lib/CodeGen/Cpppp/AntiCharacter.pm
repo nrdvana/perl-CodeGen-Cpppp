@@ -1,4 +1,8 @@
 package CodeGen::Cpppp::AntiCharacter;
+
+# VERSION
+# ABSTRACT: AntiCharacters combine with characters to produce nothing
+
 use v5.20;
 use warnings;
 use Carp;
