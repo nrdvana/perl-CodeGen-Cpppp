@@ -1,13 +1,9 @@
 #! /usr/bin/env perl
-use Test2::V0;
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
 use CodeGen::Cpppp;
-use Data::Printer;
 
-# Perl didn't get <<~'x' until 5.28
-sub unindent {
-   my ($indent)= ($_[0] =~ /^(\s+)/);
-   $_[0] =~ s/^$indent//mgr;
-}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
@@ -18,7 +14,7 @@ my @tests= (
       ## say "x= $x";
 C
       expect => unindent(<<'pl'),
-      # line 16 "t/20-translate-cpppp.t"
+      # line 12 "t/20-translate-cpppp.t"
       say "it worked";
       my $x= 5;
       say "x= $x";
@@ -41,13 +37,13 @@ pl
       ## }
 C
       expect => unindent(<<'pl'),
-      # line 39 "t/20-translate-cpppp.t"
+      # line 35 "t/20-translate-cpppp.t"
       for (3..4) {
          $self->_render_code_block(0,
-      # line 40 "t/20-translate-cpppp.t"
+      # line 36 "t/20-translate-cpppp.t"
             sub{ $_ }
          );
-      # line 41 "t/20-translate-cpppp.t"
+      # line 37 "t/20-translate-cpppp.t"
       }
 pl
    },
@@ -59,7 +55,7 @@ for my $t (@tests) {
    $parse->{code} =~ s/^\s+//mg;
    $t->{expect} =~ s/^\s+//mg;
    is( $parse->{code}, $t->{expect}, $t->{name} )
-      or diag &np($parse);
+      or note explain($parse);
 }
 
 done_testing;

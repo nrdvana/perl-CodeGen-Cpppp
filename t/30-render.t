@@ -1,13 +1,9 @@
 #! /usr/bin/env perl
-use Test2::V0;
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
 use CodeGen::Cpppp;
-use Data::Printer;
 
-# Perl didn't get <<~'x' until 5.28
-sub unindent {
-   my ($indent)= ($_[0] =~ /^(\s+)/);
-   $_[0] =~ s/^$indent//mgr;
-}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
@@ -136,7 +132,7 @@ for my $t (@tests) {
    my $out= $pkg->new->output;
    my $c= $out->get;
    is( $c, $t->{expect}, $t->{name} )
-      or diag &np([$out]);
+      or note explain([$out]);
 }
 
 done_testing;

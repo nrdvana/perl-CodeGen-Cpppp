@@ -1,7 +1,8 @@
 #! /usr/bin/env perl
-use Test2::V0;
-use v5.20;
 use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
+use v5.20;
 use autodie;
 use File::Temp;
 

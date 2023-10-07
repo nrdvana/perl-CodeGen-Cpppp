@@ -2,7 +2,7 @@ package CodeGen::Cpppp;
 use v5.20;
 use warnings;
 use Carp;
-use experimental 'signatures', 'postderef';
+use experimental 'signatures', 'lexical_subs', 'postderef';
 use version;
 use Cwd 'abs_path';
 use Scalar::Util 'blessed', 'looks_like_number';

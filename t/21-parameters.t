@@ -1,13 +1,9 @@
 #! /usr/bin/env perl
-use Test2::V0;
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
 use CodeGen::Cpppp;
-use Data::Printer;
 
-# Perl didn't get <<~'x' until 5.28
-sub unindent {
-   my ($indent)= ($_[0] =~ /^(\s+)/);
-   $_[0] =~ s/^$indent//mgr;
-}
 my $cpppp= CodeGen::Cpppp->new;
 
 my @tests= (
@@ -53,7 +49,7 @@ C
 for my $t (@tests) {
    subtest $t->{name} => sub {
       my $class= $cpppp->compile_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
-      for my $t2 ($t->{tests}->@*) {
+      for my $t2 (@{$t->{tests}}) {
          my $tpl= eval { $class->new($t2->{params}) };
          my $err= $@;
          if ($t2->{error}) {
@@ -64,7 +60,7 @@ for my $t (@tests) {
             ok( defined $tpl, "new template $t2->{name}" );
             is( $tpl->output->get, $t2->{expect}, "output $t2->{name}" );
             is( $tpl->x, $t2->{final}, "final value $t2->{name}" )
-               or diag &np($tpl);
+               or note explain($tpl);
          }
       }
    };

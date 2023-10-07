@@ -1,8 +1,8 @@
 #! /usr/bin/env perl
-use Test2::V0;
-use CodeGen::Cpppp;
-use Data::Printer;
 use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
+use CodeGen::Cpppp;
 
 my $cpppp= CodeGen::Cpppp->new(
    include_path => $FindBin::RealBin . '/../example',

@@ -1,7 +1,8 @@
 #! /usr/bin/env perl
-use Test2::V0;
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use Test2WithExplain;
 use CodeGen::Cpppp;
-use Data::Printer;
 
 my $cpppp= CodeGen::Cpppp->new;
 my $class= $cpppp->compile_cpppp(\<<'C', __FILE__, __LINE__+1);
