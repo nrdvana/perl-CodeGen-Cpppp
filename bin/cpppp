@@ -170,7 +170,6 @@ sub print_sections($slist, $filespec) {
    if ($filespec eq '-' || !length $filespec) {
       print $cpppp->output->get($slist);
    } else {
-      use DDP; &p($filespec);
       $cpppp->write_sections_to_file($slist, split('@', $filespec, 2));
    }
 }
