@@ -42,4 +42,39 @@ END
    is( slurp($out_c), "int foo(int x) { return x + 1; }\n", 'out.c' );
 };
 
+subtest splice_output_into_file => sub {
+   -e $_ && unlink $_ for $out_c, $out_h;
+   spew($out_c, <<END);
+Line 1
+Line 2
+// BEGIN GENERATED_TEXT
+// END GENERATED_TEXT
+Line 5
+END
+   is( run_cpppp([ '--section-out', 'public='.$out_c.'@GENERATED_TEXT' ], <<END), 0 );
+## section PUBLIC;
+Injected line 1
+Injected line 2
+## section PRIVATE;
+Injected line 3
+END
+   is( slurp($out_c), <<END, 'out.c' );
+Line 1
+Line 2
+// BEGIN GENERATED_TEXT
+Injected line 1
+Injected line 2
+// END GENERATED_TEXT
+Line 5
+END
+   is( run_cpppp([ '-o', $out_c.'@GENERATED_TEXT' ], ''), 0 );
+   is( slurp($out_c), <<END, 'out.c' );
+Line 1
+Line 2
+// BEGIN GENERATED_TEXT
+// END GENERATED_TEXT
+Line 5
+END
+};
+
 done_testing;

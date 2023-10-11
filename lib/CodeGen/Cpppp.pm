@@ -624,7 +624,7 @@ Example:
 =cut
 
 sub patch_file($self, $fname, $patch_markers, $new_content) {
-   $new_content .= "\n" unless $new_content =~ /\n\Z/;
+   $new_content .= "\n" unless $new_content =~ /\n\Z/ or !length $new_content;
    utf8::encode($new_content);
    open my $fh, '+<', $fname or die "open($fname): $!";
    my $content= do { local $/= undef; <$fh> };
