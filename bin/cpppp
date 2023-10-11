@@ -87,7 +87,7 @@ execute it.
 
 =back
 
-eventually will support many that C<cpp> has, for defining things and parsing
+eventually it will support many that C<cpp> has, for defining things and parsing
 headers to discover existing types.
 
 =cut

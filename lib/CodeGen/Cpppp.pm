@@ -13,19 +13,49 @@ our $VERSION= 0; # VERSION
 
 =head1 SYNOPSIS
 
+I<It's very special, because, if you can see, the preprocessor, goes up, to
+C<perl>.  Look, right across the directory, C<perl>, C<perl>, C<perl>.>
+
+=over
+
+I<And most distributions go up to C<m4> >
+
+=back
+
+I<Exactly>
+
+=over
+
 I<Does that mean it's more powerful?  ...Is it more powerful?>
 
-I<Well, it's one layer of abstraction higher, isn't it?  It's not C<m4>.  You see, most
-blokes gonna be templating with C<cpp> or C<m4>, you're on C<m4> here all the way up,
-all the way up, Where can you go from there? Where?>
+=back
 
-I<Nowhere!  Exactly.>
+I<Well, it's one layer of abstraction higher, isn't it?  It's not C<m4>.
+You see, most blokes gonna be templating with C<cpp> or C<m4>, you're on C<m4>
+here all the way up, all the way up, aaaall the way up, you're at C<m4> for your
+pre-processing, Where can you go from there? Where?  Nowhere!  Exactly.>
 
-I<What we do is if we need that extra, push, over the cliff, you know what we do?>
+I<What we do is if we need that extra, push over the cliff, you know what we do?>
 
-I<C<perl>, exactly.>
+=over
 
-I<These go to C<perl>.>
+I<put it up to C<perl> >
+
+=back
+
+I< C<perl>, exactly. One higher. >
+
+=over
+
+I<Why don't you just download the C<cpp> source, and enhance it with the
+abstractions you need?  Make C<cpp> more powerful, and make C<cpp> be the
+preprocessor?>
+
+=back
+
+I<...>
+
+I<These go to B<perl>.>
 
 B<Input:>
 
@@ -579,7 +609,7 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
 
   $cpppp->patch_file($filename, $marker, $new_content);
 
-Reads C<$filename>, looking for lines containing C<"BEGIN $merker"> and
+Reads C<$filename>, looking for lines containing C<"BEGIN $marker"> and
 C<"END $marker">.  If not found, it dies.  It then replaces all the lines
 between those two lines with C<$new_content>, and writes it back to the same
 file handle.
@@ -608,7 +638,17 @@ sub patch_file($self, $fname, $patch_markers, $new_content) {
    $self;
 }
 
-sub overwrite_file_with_backup($self, $fname, $new_content) {
+=head2 backup_and_overwrite_file
+
+  $cpppp->backup_and_overwrite_file($filename, $new_content);
+
+Create a backup of $filename if it already exists, and then write a new file
+containing C<$new_content>.  The backup is created by appending a ".N" to the
+filename, choosing the first available "N" counting upward from 0.
+
+=cut
+
+sub backup_and_overwrite_file($self, $fname, $new_content) {
    $new_content .= "\n" unless $new_content =~ /\n\Z/;
    utf8::encode($new_content);
    if (-e $fname) {
@@ -623,13 +663,25 @@ sub overwrite_file_with_backup($self, $fname, $new_content) {
    $self;
 }
 
+=head2 write_sections_to_file
+
+  $cpppp->write_sections_to_file($section_spec, $filename);
+  $cpppp->write_sections_to_file($section_spec, $filename, $patch_markers);
+
+This is a simple wrapper around L<CodeGen::Cpppp::Output/get> and either
+C</backup_and_overwrite_file> or L</patch_file>, depending on whether you
+supply C<$patch_markers>.
+
+=cut
+
 sub write_sections_to_file($self, $sections, $fname, $patch_markers=undef) {
    my $content= $self->output->get($sections);
    if (defined $patch_markers) {
       $self->patch_file($fname, $patch_markers, $content);
    } else {
-      $self->overwrite_file_with_backup($fname, $content);
+      $self->backup_and_overwrite_file($fname, $content);
    }
+   $self
 }
 
 sub _slurp_file($self, $fname) {
