@@ -1,3 +1,8 @@
+0.001 - 2023-10-11
+  - Fixed bugs in output-to-file
+  - More documentation and unit tests
+  - Back-compat to 5.20
+
 0.001_04 - 2023-09-25
   - template parameters, assignable from cli
   - output file patching, configurable from cli
