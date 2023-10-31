@@ -9,6 +9,7 @@ use experimental 'signatures', 'postderef';
 use Carp;
 use Scalar::Util 'looks_like_number';
 use List::Util 'max';
+use overload '""' => sub { $_[0]->get };
 
 =head1 DESCRIPTION
 

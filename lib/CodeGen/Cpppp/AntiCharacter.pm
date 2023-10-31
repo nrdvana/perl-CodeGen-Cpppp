@@ -32,7 +32,7 @@ of characters to ignore while looking for the characters to remove.
 If the concatenation does not remove all of the target characters, the
 concatenation returns another object which can continue the hunt.
 
-Anticharacters so not work with C<join>, only with regular concatenation.
+Anticharacters do not work with C<join>, only with regular concatenation.
 Stringifying an anticharacter ends the search and returns a simple string
 of anything that had accumulated during the search for the characters to remove.
 

@@ -11,7 +11,7 @@ use CodeGen::Cpppp::Template;
 our $VERSION= 0; # VERSION
 # ABSTRACT: The C Perl-Powered Pre-Processor
 
-=head1 SYNOPSIS
+=head1 RATIONALE
 
 I<It's very special, because, if you can see, the preprocessor, goes up, to
 C<perl>.  Look, right across the directory, C<perl>, C<perl>, C<perl>.>
@@ -55,7 +55,26 @@ preprocessor?>
 
 I<...>
 
-I<These go to B<perl>.>
+I<... These go to B<perl>.>
+
+=head1 SYNOPSIS
+
+  # Cpppp object is a template factory
+  my $cpppp= CodeGen::Cpppp->new(%options);
+  
+  # Simple templates immediately generate their output during
+  # construction, which goes to the output accumulator of $cpppp
+  # by default.
+  $cpppp->new_template($filename, %params);
+  
+  # Complex templates can define custom methods
+  my $tpl= $cpppp->new_template($otherfile, %params);
+  $tpl->generate_more_stuff(...);
+  
+  # Inspect or print the accumulated output
+  say $cpppp->output;
+  $cpppp->write_sections_to_file(public  => 'project.h');
+  $cpppp->write_sections_to_file(private => 'project.c');
 
 B<Input:>
 
@@ -91,9 +110,13 @@ B<Output:>
              right: 15;
   };
 
-=head1 DESCRIPTION
+=head1 SECURITY NOTICE
 
-B<WARNING: this API is completely and totally unstable>.
+B<Templates are equivalent to perl scripts>.  Use the same caution when
+using cpppp templates that you would use when running perl scripts.
+Do not load, compile, or render templates from un-trusted authors.
+
+=head1 DESCRIPTION
 
 This module is a preprocessor for C, or maybe more like a perl template engine
 that specializes in generating C code.  Each input file gets translated to Perl
@@ -104,7 +127,11 @@ like automatically generating headers or function prototypes.
 For the end-user, there is a 'cpppp' command line tool that behaves much like
 the 'cpp' tool.
 
-If you have an interest in this, contact me, because I could use help
+B<WARNING: this API is not stable>.  It would be unwise to use C<cpppp>
+as part of a distribution's build scripts yet, but it is perfectly safe to use
+it to generate sources and then add those generated files to a project.
+
+If you have an interest in this topic, contact me, because I could use help
 brainstorming ideas about how to accommodate the most possibilities, here.
 
 B<Possible Future Features:>
@@ -176,7 +203,8 @@ sub autocolumn($self, $newval=undef) {
 =head2 include_path
 
 An arrayref of directories to search for template files during
-C<require_template>.
+C<require_template>.  Make sure no un-trusted users have control over any
+directory in this path, the same as you would do for Perl's C<@INC> paths.
 
 =head2 output
 
@@ -554,8 +582,7 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
    }xg;
    
    my $prev_eval;
-   for (0..$#subst) {
-      my $s= $subst[$_];
+   for my $s (@subst) {
       if (exists $s->{colgroup}) {
          my $linestart= (rindex($text, "\n", $s->{pos})+1);
          my $col= $s->{pos} - $linestart;
@@ -594,11 +621,10 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
          $prev_eval= $s;
       }
    }
-   # cleanup
+   # Clean up any tracked column that ended before the final line of the template
    for my $c (grep looks_like_number($_), keys $parse->{coltrack}->%*) {
-      if ($parse->{coltrack}{$c}{line} < $line-1) {
-         _finish_coltrack($parse->{coltrack}, $c);
-      }
+      _finish_coltrack($parse->{coltrack}, $c)
+         if $parse->{coltrack}{$c}{line} < $line-1;
    }
    @subst= grep defined $_->{eval} || defined $_->{colgroup}, @subst;
    
