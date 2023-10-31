@@ -158,18 +158,6 @@ Directly perform the work of inlining one function into another.
 
 =head1 ATTRIBUTES
 
-=head2 autocomma
-
-Default value for new templates; determines whether expansion of an array
-variable will automatically join with commas depending on the surrounding
-generated C code.
-
-=head2 autostatementline
-
-Default value for new templates; determines whether expansion of an array
-variable in statement context automatically joins them with a semicolon and
-line feed.
-
 =head2 autoindent
 
 Default value for new templates; determines whether embedded newlines inside
@@ -183,14 +171,6 @@ output after variables have been expanded.
 
 =cut
 
-sub autocomma($self, $newval=undef) {
-   $self->{autocomma}= $newval if defined $newval;
-   $self->{autocomma} // 1;
-}
-sub autostatementline($self, $newval=undef) {
-   $self->{autostatementline}= $newval if defined $newval;
-   $self->{autostatementline} // 1;
-}
 sub autoindent($self, $newval=undef) {
    $self->{autoindent}= $newval if defined $newval;
    $self->{autoindent} // 1;
@@ -398,8 +378,6 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
    }
    $line //= 1;
    $self->{cpppp_parse}= {
-      autocomma         => $self->autocomma,
-      autostatementline => $self->autostatementline,
       autoindent        => $self->autoindent,
       autocolumn        => $self->autocolumn,
       filename          => $filename,

@@ -181,8 +181,10 @@ sub new($class, @args) {
    }
 
    my $self= bless {
+      autocomma => 1,
+      autostatementline => 1,
       (map +($_ => $parse->{$_}), qw(
-         autocomma autoindent autostatementline autocolumn
+         autoindent autocolumn
          context
       )),
       output => CodeGen::Cpppp::Output->new,
