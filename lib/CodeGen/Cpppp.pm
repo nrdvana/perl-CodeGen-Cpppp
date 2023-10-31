@@ -110,7 +110,7 @@ B<Output:>
              right: 15;
   };
 
-=head1 SECURITY NOTICE
+=head1 SECURITY
 
 B<Templates are equivalent to perl scripts>.  Use the same caution when
 using cpppp templates that you would use when running perl scripts.
