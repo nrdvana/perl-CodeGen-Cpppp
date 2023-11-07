@@ -56,7 +56,7 @@ END
 ) {
    my ($name, $code, $expected)= @$_;
    my @tokens;
-   @tokens= CodeGen::Cpppp::CParser::_get_tokens() for $code;
+   @tokens= CodeGen::Cpppp::CParser->tokenize($code);
    is( \@tokens, $expected, $name );
 }
 

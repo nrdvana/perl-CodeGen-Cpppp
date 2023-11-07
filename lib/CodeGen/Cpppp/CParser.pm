@@ -8,6 +8,63 @@ use warnings;
 use Carp;
 use experimental 'signatures', 'postderef';
 
+sub new {
+   my $class= shift;
+   my $self= bless {
+      !(@_ & 1)? @_
+      : @_ == 1 && ref $_[0] eq 'HASH'? %{$_[0]}
+      : Carp::croak("Expected hashref or even-length list")
+   }, $class;
+}
+
+=head1 METHODS
+
+=head2 tokenize
+
+  @tokens= $class->tokenize($string);
+  @tokens= $class->tokenize(\$string);
+  @tokens= $class->tokenize(\$string, $max_tokens);
+
+Parse some number of C language tokens from the input string, and update the
+regex C<pos()> of the string so that you can resume parsing more tokens later.
+Since this updates the pos of the string, you can pass it as a reference to
+make it more clear to readers what is happening.
+
+If C<$max_tokens> is given, only that many tokens will be returned.
+
+Whitespace is ignored (not returned as a token) except for whitespace contained
+in a 'directive' token.  The body of a directive needs further tokenized.
+
+Each token is an arrayref of the form:
+
+  [ $type, $value, $offset, $length ]
+  
+  $type:   'directive', 'comment', 'string', 'char', 'real', 'integer',
+           'keyword', 'ident', 'unknown', or any punctuation character
+  
+  $value:  for constants, this is the decoded string or numeric value
+           for directives and comments, it is the body text
+           for punctuation, it is a copy of $type
+           for unknown, it is the exact character that didn't parse
+  
+  $offset: the character offset within the source $string
+  
+  $length: the number of characters occupied in the source $string
+
+For some tokens, you will need to inspect C<< substr($string, $offset, $length) >>
+to get the full details, like the suffixes on integer constants.
+
+Consecutive string tokens are not merged, since the parser needs to handle
+that step after preprocessor macros are substituted.
+
+=cut
+
+sub tokenize {
+   my ($class, undef, $tok_lim)= @_;
+   my $textref= ref $_[1] eq 'SCALAR'? $_[1] : \$_[1];
+   $class->_get_tokens($textref, $tok_lim);
+}
+
 our %keywords= map +($_ => 1), qw( 
    auto break case char const continue default do double else enum extern
    float for goto if int long register return short signed sizeof static
@@ -29,11 +86,12 @@ our %named_escape= (
    n => "\n", r => "\r", t => "\t", v => "\x0B"
 );
 sub _get_tokens {
-   pos= 0 unless defined pos;
+   my ($class, $textref, $tok_lim)= @_;
+   pos($$textref)= 0 unless defined pos($$textref);
    my @tokens;
    local our $_type;
    local our $_value;
-   while (m{
+   while ($$textref =~ m{
          \G
          \s* \K # ignore whitespace
          (?|
@@ -77,7 +135,7 @@ sub _get_tokens {
 
             # real number
          |  ( (?: [0-9]+ \. [0-9]* | \. [0-9]+ ) (?: e -? [0-9]+ )? [lLfF]? )
-            (?{ $_type= 'float' })
+            (?{ $_type= 'real' })
 
          |  # integer
             (?|
@@ -102,6 +160,7 @@ sub _get_tokens {
    ) {
       push @tokens, [ $_type, $_value // $1, $-[0], $+[0] - $-[0] ];
       $_value= undef;
+      last if defined $tok_lim && --$tok_lim <= 0;
    }
    return @tokens;
 }
