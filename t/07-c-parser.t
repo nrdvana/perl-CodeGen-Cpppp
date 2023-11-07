@@ -7,7 +7,8 @@ use v5.20;
 use CodeGen::Cpppp::CParser;
 
 for (
-   [ 'for(int i=0; i<1; i++){}',
+   [  'For loop',
+      'for(int i=0; i<1; i++){}',
       [ [ keyword => 'for', 0, 3 ],
         [ '('     => '(',   3, 1 ],
         [ keyword => 'int', 4, 3 ],
@@ -26,11 +27,37 @@ for (
         [ '}'     => '}',  23, 1 ],
       ]
    ],
+   [  'Strings',
+      q{ "test" "" "line1\nline2\x20" "start\\}."\n".q{ end" "\0\012\""},
+      [ [ string => 'test',           1,  6 ],
+        [ string => '',               8,  2 ],
+        [ string => "line1\nline2 ", 11, 18 ],
+        [ string => "start end",     30, 13 ],
+        [ string => "\0\n\"",        44, 10 ],
+      ]
+   ],
+   [  'Comments', <<END,
+ /* Test1 */  /** Test2 **//*
+Test3
+More3
+/*/
+test // foo /*
+*/
+END
+      [ [ comment => ' Test1 ',  D, D ],
+        [ comment => '* Test2 *', D, D ],
+        [ comment => "\nTest3\nMore3\n/", D, D ],
+        [ ident   => 'test', D, D ],
+        [ comment => ' foo /*', D, D ],
+        [ '*'     => '*', D, D ],
+        [ '/'     => '/', D, D ],
+      ]
+   ],
 ) {
-   my ($code, $expected)= @$_;
+   my ($name, $code, $expected)= @$_;
    my @tokens;
    @tokens= CodeGen::Cpppp::CParser::_get_tokens() for $code;
-   is( \@tokens, $expected );
+   is( \@tokens, $expected, $name );
 }
 
 done_testing;

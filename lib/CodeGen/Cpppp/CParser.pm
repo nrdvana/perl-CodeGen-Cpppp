@@ -24,7 +24,10 @@ our %keywords= map +($_ => 1), qw(
 
    restrict
 );
-
+our %named_escape= (
+   a => "\a", b => "\b", e => "\e", f => "\f",
+   n => "\n", r => "\r", t => "\t", v => "\x0B"
+);
 sub _get_tokens {
    pos= 0 unless defined pos;
    my @tokens;
@@ -35,46 +38,63 @@ sub _get_tokens {
          \s* \K # ignore whitespace
          (?|
             # single-line comment
-            // [ \t]* ( [^\r\n]* )   (?{ $_type= 'linecomment' })
-            
+            // ( [^\r\n]* )
+            (?{ $_type= 'comment' })
+
             # block comment
-         |  /\* ( (?: [^*]+ | \* (?=[^/]) )* ) \*/ (?{ $_type= 'blockcomment' })
-            
+         |  /\* ( (?: [^*]+ | \* (?=[^/]) )* ) \*/
+            (?{ $_type= 'comment' })
+
             # Preprocessor directive
          |  \# \s* ( (?: [^\r\n\\]+ | \\ \r? \n | \\ (?=[^\r\n]) )* )
             (?{ $_type= 'directive' })
-            
+
             # string literal
-         |  " ( (?: [^"\\]+ | \\ . )* ) "
-            (?{ $_type= 'string'; $_value= _parse_c_str($1) })
-         
+         |  " (?{ '' })
+               (?|
+                  ([^"\\]+)          (?{ $^R . $1 })
+               |  \\x ([0-9A-Fa-f]+) (?{ $^R . chr(hex $1) })
+               |  \\ ([0-9]{1,3})    (?{ $^R . chr(oct $1) })
+               |  \\ \r?\n
+               |  \\ (.)             (?{ $^R . ($named_escape{$1} // $1) })
+               )*
+            "
+            (?{ $_type= 'string'; $_value= $^R; })
+
             # character constant
-         |  ' ( [^\\] | \\ [^xo] | \\x[0-9A-Fa-f]+ | \\o[0-7]+ ) '
-            (?{ $_type= 'char'; $_value= _parse_c_str($1) })
-         
+         |  '  (?|
+                  ([^'\\])           (?{ $1 })
+               |  \\x ([0-9A-Fa-f]+) (?{ chr(hex $1) })
+               |  \\ ([0-9]{1,3})    (?{ chr(oct $1) })
+               |  \\ (.)             (?{ $named_escape{$1} // $1 })
+               )
+            '
+            (?{ $_type= 'char'; $_value= $^R; })
+
             # identifier
-         |  ( [A-Za-z_] \w* ) (?{ $_type= $keywords{$1}? 'keyword' : 'ident' })
- 
+         |  ( [A-Za-z_] \w* )
+            (?{ $_type= $keywords{$1}? 'keyword' : 'ident' })
+
             # real number
-         |  ( (?: [0-9]+ [.] [0-9]* | \. [0-9]+ ) (?: e -? [0-9]+ )? [lLfF]? )
+         |  ( (?: [0-9]+ \. [0-9]* | \. [0-9]+ ) (?: e -? [0-9]+ )? [lLfF]? )
             (?{ $_type= 'float' })
-         
+
          |  # integer
-            ( (?: 0x([A-Fa-f0-9]+) (?{ $_value= hex($2) })
-                | 0([0-7]+)        (?{ $_value= oct($2) })
-                | [0-9]+
-              )
-              [uU]?[lL]*
+            (?|
+               0x([A-Fa-f0-9]+) (?{ $_value= hex($1) })
+            |  0([0-7]+)        (?{ $_value= oct($1) })
+            |  ([0-9]+)
             )
+            [uU]?[lL]*
             (?{ $_type= 'integer' })
- 
+
          |  # punctuation and operators
             ( \+\+ | -- | -> | \+=? | -=? | \*=? | /=? | %=? | >>=? | >=? | <<=? | <=?
             | \&\&=? | &=? | \|\|=? | \|=? | ^=? | ==? | !=? | \? | ~
             | [\[\](){};,.:]
             )
             (?{ $_type= $1 })
-         
+
          |  # all other characters
             (.) (?{ $_type= 'unknown' })
          )
