@@ -37,7 +37,7 @@ in a 'directive' token.  The body of a directive needs further tokenized.
 
 Each token is an arrayref of the form:
 
-  [ $type, $value, $offset, $length ]
+  [ $type, $value, $offset, $length, $error=undef ]
   
   $type:   'directive', 'comment', 'string', 'char', 'real', 'integer',
            'keyword', 'ident', 'unknown', or any punctuation character
@@ -50,6 +50,10 @@ Each token is an arrayref of the form:
   $offset: the character offset within the source $string
   
   $length: the number of characters occupied in the source $string
+  
+  $error: if the token is invalid in some way, but still undisputedly that
+          type of token (e.g. unclosed string or unclosed comment) it will be
+          returned with a 5th element containing the error message.
 
 For some tokens, you will need to inspect C<< substr($string, $offset, $length) >>
 to get the full details, like the suffixes on integer constants.
@@ -91,7 +95,9 @@ sub _get_tokens {
    my @tokens;
    local our $_type;
    local our $_value;
-   while ($$textref =~ m{
+   local our $_error;
+   while ((!defined $tok_lim || --$tok_lim >= 0)
+      && $$textref =~ m{
          \G
          \s* \K # ignore whitespace
          (?|
@@ -100,8 +106,8 @@ sub _get_tokens {
             (?{ $_type= 'comment' })
 
             # block comment
-         |  /\* ( (?: [^*]+ | \* (?=[^/]) )* ) \*/
-            (?{ $_type= 'comment' })
+         |  /\* ( (?: [^*]+ | \* (?=[^/]) )* ) ( \*/ | \Z )
+            (?{ $_type= 'comment'; $_error= "Reached end of input looking for '*/'" unless $2 })
 
             # Preprocessor directive
          |  \# \s* ( (?: [^\r\n\\]+ | \\ \r? \n | \\ (?=[^\r\n]) )* )
@@ -116,8 +122,8 @@ sub _get_tokens {
                |  \\ \r?\n
                |  \\ (.)             (?{ $^R . ($named_escape{$1} // $1) })
                )*
-            "
-            (?{ $_type= 'string'; $_value= $^R; })
+            ( " | \Z )
+            (?{ $_type= 'string'; $_value= $^R; $_error= q{Reached end of input looking for '"'} unless $2 })
 
             # character constant
          |  '  (?|
@@ -126,8 +132,8 @@ sub _get_tokens {
                |  \\ ([0-9]{1,3})    (?{ chr(oct $1) })
                |  \\ (.)             (?{ $named_escape{$1} // $1 })
                )
-            '
-            (?{ $_type= 'char'; $_value= $^R; })
+            ( '? )
+            (?{ $_type= 'char'; $_value= $^R; $_error= q{Unterminated character constant} unless $2 })
 
             # identifier
          |  ( [A-Za-z_] \w* )
@@ -154,13 +160,12 @@ sub _get_tokens {
             (?{ $_type= $1 })
 
          |  # all other characters
-            (.) (?{ $_type= 'unknown' })
+            (.) (?{ $_type= 'unknown'; $_error= q{parse error} })
          )
       }xcg
    ) {
-      push @tokens, [ $_type, $_value // $1, $-[0], $+[0] - $-[0] ];
-      $_value= undef;
-      last if defined $tok_lim && --$tok_lim <= 0;
+      push @tokens, [ $_type, $_value // $1, $-[0], $+[0] - $-[0], defined $_error? ($_error) : () ];
+      ($_error, $_value)= (undef, undef);
    }
    return @tokens;
 }

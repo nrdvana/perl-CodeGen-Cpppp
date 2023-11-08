@@ -53,6 +53,20 @@ END
         [ '/'     => '/', D, D ],
       ]
    ],
+   [ 'Parse errors str', q{"test},
+      [ [ string => 'test', 0, 5, D ],
+      ]
+   ],
+   [ 'Parse errors character', q{'fg'},
+      [ [ char => 'f', 0, 2, D ],
+        [ ident => 'g', 2, 1 ],
+        [ unknown => "'", 3, 1, D ],
+      ]
+   ],
+   [ 'Parse errors comment', qq{/* foo \n \n \n},
+      [ [ comment => " foo \n \n \n", 0, D, D ],
+      ]
+   ],
 ) {
    my ($name, $code, $expected)= @$_;
    my @tokens;
