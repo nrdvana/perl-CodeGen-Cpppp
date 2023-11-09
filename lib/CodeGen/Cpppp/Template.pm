@@ -75,7 +75,7 @@ package CodeGen::Cpppp::Template::Exports {
          unless defined $cpppp;
       Carp::croak("cpppp source cannot be empty")
          unless length $cpppp;
-      
+
       my $parse= CodeGen::Cpppp->new->parse_cpppp(\$cpppp, $filename, $line);
       $pkg->_init_parse_data($parse);
       $pkg->_build_BUILD_method(
@@ -209,6 +209,33 @@ sub current_output_section($self, $new=undef) {
    $self->{current_output_section};
 }
 
+=head2 autocolumn
+
+Whether to look for column-alignment in the template source and try to preserve
+that column alignment after all variables have been substituted.
+
+=head2 autocomma
+
+Whether to automatically insert commas when interpolating an array into a
+template, based on context.
+
+=head2 autoindent
+
+Whether to guess what the proper indent should be when substituting content
+that contains a newline.
+
+=head2 autostatementline
+
+Whether to automatically insert newlines (and maybe indent) when substituting
+an array into a template, based on context.
+
+=cut
+
+sub autocolumn        { $_[0]{autocolumn}       = $_[1]||0 if @_ > 1; $_[0]{autocolumn}        }
+sub autocomma         { $_[0]{autocomma}        = $_[1]||0 if @_ > 1; $_[0]{autocomma}         }
+sub autoindent        { $_[0]{autoindent}       = $_[1]||0 if @_ > 1; $_[0]{autoindent}        }
+sub autostatementline { $_[0]{autostatementline}= $_[1]||0 if @_ > 1; $_[0]{autostatementline} }
+
 sub _parse_data($class) {
    $class = ref $class if ref $class;
    no strict 'refs';
@@ -253,9 +280,8 @@ sub new($class, @args) {
    my $self= bless {
       autocomma => 1,
       autostatementline => 1,
-      (map +($_ => $parse->{$_}), qw(
-         autoindent autocolumn
-         context
+      (map +($_ => $parse->{$_}||0), qw(
+         autoindent autocolumn convert_linecomment_to_c89
       )),
       output => CodeGen::Cpppp::Output->new,
       current_output_section => 'private',

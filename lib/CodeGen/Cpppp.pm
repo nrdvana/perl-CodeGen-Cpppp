@@ -169,6 +169,11 @@ Default value for new templates; enables the feature that detects column layout
 in the source template, and attempts to line up those same elements in the
 output after variables have been expanded.
 
+=head2 convert_linecomment_to_c89
+
+If true, rewrite the output to convert newer '//' comments into traditional
+'/*' comments.
+
 =cut
 
 sub autoindent($self, $newval=undef) {
@@ -178,6 +183,11 @@ sub autoindent($self, $newval=undef) {
 sub autocolumn($self, $newval=undef) {
    $self->{autocolumn}= $newval if defined $newval;
    $self->{autocolumn} // 1;
+}
+
+sub convert_linecomment_to_c89($self, $newval=undef) {
+   $self->{convert_linecomment_to_c89}= $newval if defined $newval;
+   $self->{convert_linecomment_to_c89} // 0;
 }
 
 =head2 include_path
@@ -661,6 +671,35 @@ sub backup_and_overwrite_file($self, $fname, $new_content) {
    $self;
 }
 
+=head2 get_filtered_output
+
+  my $text= $cpppp->get_filtered_output($sections);
+
+Like C<< $cpppp->output->get >>, but also apply filters to the output, like
+L</convert_linecomment_to_c89>.
+
+=cut
+
+sub get_filtered_output($self, $sections) {
+   my $content= $self->output->get($sections);
+   if ($self->convert_linecomment_to_c89) {
+      # rewrite '//' comments as '/*' comments
+      require CodeGen::Cpppp::CParser;
+      my @tokens= CodeGen::Cpppp::CParser->tokenize($content);
+      my $ofs= 0;
+      for (@tokens) {
+         $_->[2] += $ofs;
+         if ($_->type eq 'comment') {
+            if (substr($content, $_->src_pos, 2) eq '//') {
+               substr($content, $_->src_pos, $_->src_len, '/*'.$_->value.' */');
+               $ofs += 3;
+            }
+         }
+      }
+   }
+   $content;
+}
+
 =head2 write_sections_to_file
 
   $cpppp->write_sections_to_file($section_spec, $filename);
@@ -673,7 +712,7 @@ supply C<$patch_markers>.
 =cut
 
 sub write_sections_to_file($self, $sections, $fname, $patch_markers=undef) {
-   my $content= $self->output->get($sections);
+   my $content= $self->get_filtered_output($sections);
    if (defined $patch_markers) {
       $self->patch_file($fname, $patch_markers, $content);
    } else {

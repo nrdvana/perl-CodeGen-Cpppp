@@ -80,6 +80,10 @@ All sections diverted to this FILENAME will be omitted from the regular output.
 List the sections of output (in order they would be written) and exit without
 writing any files.  The output is TSV.  More columns may be added in the future.
 
+=item C<--convert-linecomment-to-c89>
+
+Convert all '//' comments to '/*' comments.
+
 =item C<--dump-pl>
 
 Output the generated perl sourcecode for the top-level perl script and don't
@@ -100,6 +104,7 @@ GetOptions(
    '--out|o=s'               => \(my $opt_out= '-'),
    '--section-out=s'         => \my @opt_section_out,
    '--list-sections'         => \my $opt_list_sections,
+   '--convert-linecomment-to-c89' => \my $convert_linecomment_to_c89,
    '--help'                  => sub { pod2usage(1) },
    '--version'               => sub { say CodeGen::Cpppp->VERSION; exit 0 },
 ) or pod2usage(2);
@@ -134,6 +139,7 @@ sub set_feature($expr) {
 }
 
 my $cpppp= CodeGen::Cpppp->new(
+   convert_linecomment_to_c89 => $convert_linecomment_to_c89,
 );
 
 sub dump_template_perl(@input_args) {

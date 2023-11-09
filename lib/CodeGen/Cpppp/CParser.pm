@@ -47,9 +47,9 @@ Each token is an arrayref of the form:
            for punctuation, it is a copy of $type
            for unknown, it is the exact character that didn't parse
   
-  $offset: the character offset within the source $string
+  $src_pos: the character offset within the source $string
   
-  $length: the number of characters occupied in the source $string
+  $src_len: the number of characters occupied in the source $string
   
   $error: if the token is invalid in some way, but still undisputedly that
           type of token (e.g. unclosed string or unclosed comment) it will be
@@ -68,6 +68,11 @@ sub tokenize {
    my $textref= ref $_[1] eq 'SCALAR'? $_[1] : \$_[1];
    $class->_get_tokens($textref, $tok_lim);
 }
+
+sub CodeGen::Cpppp::CParser::Token::type    { $_[0][0] }
+sub CodeGen::Cpppp::CParser::Token::value   { $_[0][1] }
+sub CodeGen::Cpppp::CParser::Token::src_pos { $_[0][2] }
+sub CodeGen::Cpppp::CParser::Token::src_len { $_[0][3] }
 
 our %keywords= map +($_ => 1), qw( 
    auto break case char const continue default do double else enum extern
@@ -164,7 +169,8 @@ sub _get_tokens {
          )
       }xcg
    ) {
-      push @tokens, [ $_type, $_value // $1, $-[0], $+[0] - $-[0], defined $_error? ($_error) : () ];
+      my @token= ($_type, $_value // $1, $-[0], $+[0] - $-[0], defined $_error? ($_error) : ());
+      push @tokens, bless \@token, 'CodeGen::Cpppp::CParser::Token';
       ($_error, $_value)= (undef, undef);
    }
    return @tokens;
