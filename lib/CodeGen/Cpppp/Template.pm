@@ -6,7 +6,7 @@ package CodeGen::Cpppp::Template;
 use v5.20;
 use warnings;
 use Carp;
-use experimental 'signatures', 'postderef';
+use experimental 'signatures', 'lexical_subs', 'postderef';
 use Scalar::Util 'looks_like_number';
 use Hash::Util;
 use CodeGen::Cpppp::Output;
@@ -170,8 +170,10 @@ sub _gen_BUILD_method($class, $cpppp_ver, $perl, $src_filename, $src_lineno) {
 }
 
 sub _build_BUILD_method($class, $version, $perl, $src_filename, $src_lineno) {
-   no strict 'refs';
-   croak "${class}::BUILD is already defined" if defined &{$class.'::BUILD'};
+   {
+      no strict 'refs';
+      croak "${class}::BUILD is already defined" if defined &{$class.'::BUILD'};
+   }
    croak "Compile failed for ${class}::BUILD() : $@"
       unless eval join "\n",
          $class->_gen_BUILD_method($version, $perl, $src_lineno, $src_filename),
