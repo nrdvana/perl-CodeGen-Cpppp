@@ -347,14 +347,8 @@ sub _gen_perl_template_package($self, $parse, %opts) {
       ("use CodeGen::Cpppp::Template -setup => $cpppp_ver;")x!($tpl_use_line),
       # All the rest of the user's use/no statements
       @global,
-      # Everything after that goes into a sub
-      "sub BUILD(\$self, \$constructor_parameters=undef) {",
-      "  Scalar::Util::weaken(\$self);",
-      # Inject all the lexical functions that need to be in scope
-      $pkg->_gen_perl_scope_functions($cpppp_ver),
-      qq{# line $src_lineno "$src_filename"},
-      $perl,
-      "}",
+      # Everything after that goes into a BUILD method
+      $pkg->_gen_BUILD_method($cpppp_ver, $perl, $src_filename, $src_lineno),
       "1";
 }
 
@@ -673,7 +667,7 @@ sub backup_and_overwrite_file($self, $fname, $new_content) {
   $cpppp->write_sections_to_file($section_spec, $filename, $patch_markers);
 
 This is a simple wrapper around L<CodeGen::Cpppp::Output/get> and either
-C</backup_and_overwrite_file> or L</patch_file>, depending on whether you
+L</backup_and_overwrite_file> or L</patch_file>, depending on whether you
 supply C<$patch_markers>.
 
 =cut

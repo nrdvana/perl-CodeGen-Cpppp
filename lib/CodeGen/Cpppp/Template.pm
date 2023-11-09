@@ -37,15 +37,52 @@ Exports symbols C<PUBLIC>, C<PROTECTED>, C<PRIVATE>
 
 =cut
 
-use constant {
-   PUBLIC     => 'public',
-   PROTECTED  => 'protected',
-   PRIVATE    => 'private',
-};
-our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE );
-our %EXPORT_TAGS= (
-   'v0' => \@EXPORT_OK,
-);
+package CodeGen::Cpppp::Template::Exports {
+   use constant {
+      PUBLIC     => 'public',
+      PROTECTED  => 'protected',
+      PRIVATE    => 'private',
+   };
+   our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp );
+   our %EXPORT_TAGS= (
+      'v0' => \@EXPORT_OK,
+   );
+   sub compile_cpppp {
+      my ($pkg, $filename, $line)= caller;
+      my $cpppp;
+      if (@_ == 1) {
+         # If the argument is multiple lines, assume it is cpppp code
+         if (index($_[0], "\n") >= 0) {
+            $cpppp= $_[0];
+         }
+         # if the argument is '__DATA__', read it from DATA
+         elsif ($_[0] eq '__DATA__') {
+            no strict 'refs';
+            my $fh= *{${pkg}.'::DATA'};
+            my $pos= $fh->tell;
+            local $/= undef;
+            $cpppp= <$fh>;
+            # now find out what line __DATA__ started on
+            eval {
+               $fh->seek(0,0);
+               $/= \$pos;
+               $line= 1 + scalar(()= <$fh> =~ /\n/g);
+            } or Carp::carp("Can't determine line number of __DATA__");
+            close $fh;
+         }
+      }
+      Carp::croak("parse_cppp argument should either be '__DATA__' or lines of cpppp code ending with '\\n'")
+         unless defined $cpppp;
+      Carp::croak("cpppp source cannot be empty")
+         unless length $cpppp;
+      
+      my $parse= CodeGen::Cpppp->new->parse_cpppp(\$cpppp, $filename, $line);
+      $pkg->_init_parse_data($parse);
+      $pkg->_build_BUILD_method(
+         $pkg->cpppp_version, $parse->{code}, $filename, $line);
+   }
+}
+
 sub _tag_for_version($ver) {
    return ':v0';
 }
@@ -60,33 +97,20 @@ sub import {
          $class->_setup_derived_package($caller, $ver);
       }
    }
+   splice(@_, 0, 1, 'CodeGen::Cpppp::Template::Exports');
    goto \&Exporter::import;
 }
 
 our $_next_pkg= 1;
-sub _create_derived_package($class, $version, $parse_data) {
+sub _create_derived_package($class, $cpppp_ver, $parse_data) {
    my $pkg= 'CodeGen::Cpppp::Template::_'.$_next_pkg++;
    no strict 'refs';
    @{"${pkg}::ISA"}= ( $class );
-   ${"${pkg}::_parse_data"}= $parse_data;
-   # Create accessors for all of the attributes declared in the template.
-   for (keys $parse_data->{template_parameter}->%*) {
-      my $name= $_;
-      *{"${pkg}::$name"}= sub { $_[0]{$name} };
-   }
-   # Expose all of the functions declared in the template
-   for (keys $parse_data->{template_method}->%*) {
-      my $name= $_;
-      *{"${pkg}::$name"}= sub {
-         my $m= shift->{template_method}{$name}
-            or croak "Template execution did not define method '$name'";
-         goto $m;
-      };
-   }
-   $pkg;
+   ${"${pkg}::cpppp_version"}= $cpppp_ver;
+   $pkg->_init_parse_data($parse_data);
 }
 
-sub _setup_derived_package($class, $pkg, $version) {
+sub _setup_derived_package($class, $pkg, $cpppp_ver) {
    strict->import;
    warnings->import;
    utf8->import;
@@ -94,9 +118,35 @@ sub _setup_derived_package($class, $pkg, $version) {
 
    no strict 'refs';
    @{"${pkg}::ISA"}= ( $class ) unless @{"${pkg}::ISA"};
+   ${"${pkg}::cpppp_version"}= $cpppp_ver;
 }
 
-sub _gen_perl_scope_functions($class, $version) {
+sub _init_parse_data($class, $parse_data) {
+   no strict 'refs';
+   ${"${class}::_parse_data"}= $parse_data;
+   # Create accessors for all of the attributes declared in the template.
+   for (keys $parse_data->{template_parameter}->%*) {
+      my $name= $_;
+      *{"${class}::$name"}= sub { $_[0]{$name} };
+   }
+   # Expose all of the functions declared in the template
+   for (keys $parse_data->{template_method}->%*) {
+      my $name= $_;
+      *{"${class}::$name"}= sub {
+         my $m= shift->{template_method}{$name}
+            or croak "Template execution did not define method '$name'";
+         goto $m;
+      };
+   }
+   $class;
+}
+
+sub cpppp_version($class) {
+   no strict 'refs';
+   ${"${class}::cpppp_version"} // __PACKAGE__->VERSION
+}
+
+sub _gen_perl_scope_functions($class, $cpppp_ver) {
    return (
       '# line '. (__LINE__+1) . ' "' . __FILE__ . '"',
       'my sub param { unshift @_, $self; goto $self->can("_init_param") }',
@@ -106,6 +156,26 @@ sub _gen_perl_scope_functions($class, $version) {
       'my $trim_comma= CodeGen::Cpppp::AntiCharacter->new(qr/,/, qr/\s*/);',
       'my $trim_ws= CodeGen::Cpppp::AntiCharacter->new(qr/\s*/);',
    );
+}
+
+sub _gen_BUILD_method($class, $cpppp_ver, $perl, $src_filename, $src_lineno) {
+   return
+      "sub ${class}::BUILD(\$self, \$constructor_parameters=undef) {",
+      "  Scalar::Util::weaken(\$self);",
+      # Inject all the lexical functions that need to be in scope
+      $class->_gen_perl_scope_functions($cpppp_ver),
+      qq{# line $src_lineno "$src_filename"},
+      $perl,
+      "}",
+}
+
+sub _build_BUILD_method($class, $version, $perl, $src_filename, $src_lineno) {
+   no strict 'refs';
+   croak "${class}::BUILD is already defined" if defined &{$class.'::BUILD'};
+   croak "Compile failed for ${class}::BUILD() : $@"
+      unless eval join "\n",
+         $class->_gen_BUILD_method($version, $perl, $src_lineno, $src_filename),
+         '1';
 }
 
 =head1 ATTRIBUTES
