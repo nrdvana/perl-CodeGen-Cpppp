@@ -440,7 +440,7 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
 sub _transform_template_perl($self, $pl, $line) {
    # If user declares "sub NAME(", convert that to "my sub NAME" so that it can
    # capture refs to the variables of new template instances.
-   if ($pl =~ /(my)? \s* \b sub \s* ([\w_]+) \b \s* /x) {
+   if ($pl =~ /^ \s* (my \s+)? sub \s* ([\w_]+) \b \s* /x) {
       my $name= $2;
       $self->{cpppp_parse}{template_method}{$name}= { line => $line };
       my $ofs= $-[0];
@@ -462,7 +462,7 @@ sub _transform_template_perl($self, $pl, $line) {
       $self->{cpppp_parse}{template_parameter}{$name}= substr($var_name,0,1);
    }
    # If user declares "define name(", convert that to both a method and a define
-   elsif ($pl =~ /^ \s* (define) \s* ([\w_]+) (\s*) \(/x) {
+   elsif ($pl =~ /^ \s* (define) \s+ ([\w_]+) (\s*) \(/x) {
       my $name= $2;
       $self->{cpppp_parse}{template_macro}{$name}= 'CODE';
       substr($pl, $-[1], $-[2]-$-[1], qq{my sub $name; \$self->define_template_macro($name => \\&$name); sub });
