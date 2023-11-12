@@ -99,4 +99,20 @@ int main() { /* main function */
 END
 };
 
+subtest format_commandline => sub {
+   -e $_ && unlink $_ for $out_c, $out_h;
+   is( run_cpppp([ '--convert-linecomment-to-c89', '-o', $out_c ], <<'END'), 0 );
+## use CodeGen::Cpppp::Template 'format_commandline';
+/*
+${{ format_commandline() }}
+*/
+END
+   is( slurp($out_c), <<END, 'out.c' );
+/*
+$FindBin::RealBin/../bin/cpppp --convert-linecomment-to-c89 \\
+      -o $out_c
+*/
+END
+};
+
 done_testing;

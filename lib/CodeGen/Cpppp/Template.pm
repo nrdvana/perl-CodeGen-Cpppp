@@ -43,9 +43,10 @@ package CodeGen::Cpppp::Template::Exports {
       PROTECTED  => 'protected',
       PRIVATE    => 'private',
    };
-   our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp );
+   our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp format_commandline
+   );
    our %EXPORT_TAGS= (
-      'v0' => \@EXPORT_OK,
+      'v0' => [qw( PUBLIC PROTECTED PRIVATE compile_cpppp )],
    );
    sub compile_cpppp {
       my ($pkg, $filename, $line)= caller;
@@ -80,6 +81,10 @@ package CodeGen::Cpppp::Template::Exports {
       $pkg->_init_parse_data($parse);
       $pkg->_build_BUILD_method(
          $pkg->cpppp_version, $parse->{code}, $filename, $line);
+   }
+   sub format_commandline {
+      return '' unless main->can('format_commandline');
+      return main->format_commandline;
    }
 }
 
