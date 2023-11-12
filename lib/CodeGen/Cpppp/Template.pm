@@ -52,7 +52,7 @@ package CodeGen::Cpppp::Template::Exports {
       my ($pkg, $filename, $line)= caller;
       my $cpppp;
       if (@_ == 1) {
-         # If the argument is multiple lines, assume it is cpppp code
+         # If the argument has any line terminator, assume it is cpppp code
          if (index($_[0], "\n") >= 0) {
             $cpppp= $_[0];
          }
@@ -72,7 +72,7 @@ package CodeGen::Cpppp::Template::Exports {
             close $fh;
          }
       }
-      Carp::croak("parse_cppp argument should either be '__DATA__' or lines of cpppp code ending with '\\n'")
+      Carp::croak("compile_cppp argument should either be '__DATA__' or lines of cpppp code ending with '\\n'")
          unless defined $cpppp;
       Carp::croak("cpppp source cannot be empty")
          unless length $cpppp;

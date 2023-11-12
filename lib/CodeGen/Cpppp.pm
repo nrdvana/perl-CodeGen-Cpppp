@@ -7,6 +7,7 @@ use version;
 use Cwd 'abs_path';
 use Scalar::Util 'blessed', 'looks_like_number';
 use CodeGen::Cpppp::Template;
+use CodeGen::Cpppp::Output;
 
 our $VERSION= 0; # VERSION
 # ABSTRACT: The C Perl-Powered Pre-Processor

@@ -148,7 +148,7 @@ sub dump_template_perl(@input_args) {
    my $parse= $cpppp->parse_cpppp(@input_args);
    my $code= $cpppp->_gen_perl_template_package($parse, with_data => 1);
    my $sec= $input_args[1] // $input_args[0];
-   $cpppp->output->declare_section($sec);
+   $cpppp->output->declare_sections($sec);
    $cpppp->output->append($sec, $code)
 }
 
