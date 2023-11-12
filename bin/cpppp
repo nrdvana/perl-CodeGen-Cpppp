@@ -174,7 +174,7 @@ if ($opt_list_sections) {
 
 sub print_sections($slist, $filespec) {
    if ($filespec eq '-' || !length $filespec) {
-      print $cpppp->output->get($slist);
+      print $cpppp->get_filtered_output($slist);
    } else {
       $cpppp->write_sections_to_file($slist, split('@', $filespec, 2));
    }

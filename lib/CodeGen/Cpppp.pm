@@ -673,15 +673,15 @@ sub backup_and_overwrite_file($self, $fname, $new_content) {
 
 =head2 get_filtered_output
 
-  my $text= $cpppp->get_filtered_output($sections);
+  my $text= $cpppp->get_filtered_output(@sections);
 
 Like C<< $cpppp->output->get >>, but also apply filters to the output, like
 L</convert_linecomment_to_c89>.
 
 =cut
 
-sub get_filtered_output($self, $sections) {
-   my $content= $self->output->get($sections);
+sub get_filtered_output($self, @sections) {
+   my $content= $self->output->get(@sections);
    if ($self->convert_linecomment_to_c89) {
       # rewrite '//' comments as '/*' comments
       require CodeGen::Cpppp::CParser;
