@@ -1,3 +1,11 @@
+  - Friendly message to user if reading template from tty
+  - New "action" commandline options allow sequence of operations
+    on command line: --eval, --call, --out
+  - commandline option --out now handles syntax of --section-out,
+    and --section-out is kept as a back-compat alias.
+  - Passing undef to Cpppp->get_filtered_output is now the same as
+     an empty list (meaning all output)
+
 0.003 - 2023-11-08
   - Ability to define Template as perl package with code in __DATA__
   - New utility ::CParser

@@ -682,6 +682,7 @@ L</convert_linecomment_to_c89>.
 =cut
 
 sub get_filtered_output($self, @sections) {
+   @sections= grep defined, @sections; # allow a single undef to mean 'all'
    my $content= $self->output->get(@sections);
    if ($self->convert_linecomment_to_c89) {
       # rewrite '//' comments as '/*' comments

@@ -48,6 +48,10 @@ package CodeGen::Cpppp::Template::Exports {
    our %EXPORT_TAGS= (
       'v0' => [qw( PUBLIC PROTECTED PRIVATE compile_cpppp )],
    );
+   #sub util {
+   #   return bless [ caller ], __PACKAGE__;
+   #}
+   #sub _caller { ref $_[0] eq __PACKAGE__? @{+shift} : caller(1) }
    sub compile_cpppp {
       my ($pkg, $filename, $line)= caller;
       my $cpppp;
