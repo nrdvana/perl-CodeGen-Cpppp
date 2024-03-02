@@ -107,7 +107,7 @@ sub _get_tokens {
    while ((!defined $tok_lim || --$tok_lim >= 0)
       && $$textref =~ m{
          \G
-         \s* \K # ignore whitespace
+         (?> \s* ) \K # ignore whitespace
          (?|
             # single-line comment
             // ( [^\r\n]* )
@@ -162,11 +162,11 @@ sub _get_tokens {
 
          |  # punctuation and operators
             ( \+\+ | -- | -> | \+=? | -=? | \*=? | /=? | %=? | >>=? | >=? | <<=? | <=?
-            | \&\&=? | &=? | \|\|=? | \|=? | ^=? | ==? | !=? | \? | ~
-            | [\[\](){};,.:]
+            | \&\&=? | \&=? | \|\|=? | \|=? | \^=? | ==? | !=? | \? | ~
+            | [\[\]\(\)\{\};,.:]
             )
             (?{ $_type= $1 })
-
+         
          |  # all other characters
             (.) (?{ $_type= 'unknown'; $_error= q{parse error} })
          )
