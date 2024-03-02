@@ -94,6 +94,9 @@ our %named_escape= (
    a => "\a", b => "\b", e => "\e", f => "\f",
    n => "\n", r => "\r", t => "\t", v => "\x0B"
 );
+our %tokens_before_infix_minus= map +($_ => 1), (
+   ']', ')', 'integer','real','ident',
+);
 sub _get_tokens {
    my ($class, $textref, $tok_lim)= @_;
    pos($$textref)= 0 unless defined pos($$textref);
@@ -170,7 +173,18 @@ sub _get_tokens {
       }xcg
    ) {
       my @token= ($_type, $_value // $1, $-[0], $+[0] - $-[0], defined $_error? ($_error) : ());
-      push @tokens, bless \@token, 'CodeGen::Cpppp::CParser::Token';
+      # disambiguate negative number from minus operator
+      if (($_type eq 'integer' || $_type eq 'real')
+         && @tokens && $tokens[-1][0] eq '-'
+         && (@tokens == 1 || !$tokens_before_infix_minus{$tokens[-2]->type})
+      ) {
+         $token[1]= -$token[1];
+         $token[2]= $tokens[-1][2];
+         $token[3]= $+[0] - $tokens[-1][2];
+         @{$tokens[-1]}= @token;
+      } else {
+         push @tokens, bless \@token, 'CodeGen::Cpppp::CParser::Token';
+      }
       ($_error, $_value)= (undef, undef);
    }
    return @tokens;
