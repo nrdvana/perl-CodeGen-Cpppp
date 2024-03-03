@@ -8,7 +8,7 @@ use warnings;
 use Carp;
 use experimental 'signatures', 'lexical_subs', 'postderef';
 use Scalar::Util 'looks_like_number';
-use List::Util 'any';
+use List::Util 'any', 'min', 'max', 'uniqstr';
 use CodeGen::Cpppp::CParser;
 
 =head1 SYNOPSIS
@@ -50,6 +50,9 @@ Standard constructor.  Pass values for any of the non-readonly attributes below.
 
 sub new($class, %attrs) {
    my $self= bless {}, $class;
+   # apply num_format first because it affects set_values
+   $self->num_format(delete $attrs{num_format})
+      if exists $attrs{num_format};
    $self->$_($attrs{$_}) for keys %attrs;
    return $self;
 }
@@ -73,22 +76,45 @@ or arrayref containing C<$name> or C<< [ $name, $value ] >>.  Any element
 without a value will get the next sequential value from the previous entry,
 starting from 0.
 
+=head2 value_table_var
+
+C Variable name of the constant which holds the official list of enum values.
+
+=head2 indent
+
+Set to a literal string to use for each level of indent in generated code.
+
 =head2 num_format
 
-Controls formatting of integers, as decimal or hex.  One of 'd', 'x', or 'X'.
+Controls formatting of integers, as decimal or hex.  Can be any single
+placeholder known to sprintf, like '%d', '%x', or '%X'.
 
-=head2 max_waste_factor
+=head2 max_waste_ratio
 
-Permissible amount of wasted space in a lookup table or hash table, above which
-a different algorithm will be chosen.
+Permissible ratio of empty lookup table elements vs. populated elements.
+If there would be more empty cells than that, a different algorithm will be
+chosen.  The default is 2, meaning that the table must be at least 1/3
+populated.
 
 =cut
 
+sub prefix($self, @val) {
+   if (@val) { $self->{prefix}= $val[0]; return $self }
+   $self->{prefix} // ''
+}
+
+sub macro_prefix($self, @val) {
+   if (@val) { $self->{macro_prefix}= $val[0]; return $self }
+   $self->{macro_prefix} // uc($self->prefix);
+}
+
+sub symbol_prefix($self, @val) {
+   if (@val) { $self->{symbol_prefix}= $val[0]; return $self }
+   $self->{symbol_prefix} // lc($self->prefix);
+}
+
 sub value_type($self, @val) {
-   if (@val) {
-      $self->{value_type}= $val[0];
-      return $self;
-   }
+   if (@val) { $self->{value_type}= $val[0]; return $self; }
    $self->{value_type} // 'int';
 }
 
@@ -120,12 +146,39 @@ sub set_values($self, @spec) {
       $prev= $_->[1];
    }
    $self->{values}= \@values;
+   $self->{_analysis}= undef;
    $self;
+}
+
+sub value_table_var($self, @val) {
+   if (@val) {
+      $self->{value_table_var}= $val[0];
+      return $self;
+   }
+   $self->{value_table_var} // $self->symbol_prefix . 'value_table';
+}
+
+sub indent($self, @val) {
+   if (@val) {
+      $self->{indent}= $val[0];
+      return $self;
+   }
+   $self->{indent} // '   ';
+}
+
+sub num_format($self, @val) {
+   if (@val) {
+      $self->{num_format}= $val[0];
+      $self->{_analysis}= undef;
+      return $self;
+   }
+   $self->{num_format} // '%d';
 }
 
 sub max_waste_factor($self, @val) {
    if (@val) {
       $self->{max_waste_factor}= $val[0];
+      $self->{_analysis}= undef;
       return $self;
    }
    $self->{max_waste_factor} // 2;
@@ -235,49 +288,205 @@ elements.
 =cut
 
 sub is_symbolic($self) {
+   $self->_analysis->{base_expr} ne '';
 }
 
 sub is_sequential($self) {
+   $self->_analysis->{is_seq}
 }
 
-sub is_sequentialish($self) {
+sub is_nearly_sequential($self) {
+   $self->_analysis->{is_nearly_seq}
 }
 
-sub _analyze_values($self) {
-   my @vals= map +[ $_->[0], $self->_parse_value_expr($_->[1]) ], $self->values;
-   my $base_expr= $vals[0][1];
-   my %seen_ofs= ( $vals[0][2] => 1 );
-   for (@vals[1..$#vals]) {
-      # Can't be sequential unless they share a symbolic base expression
-      $base_expr= undef, last
-         unless $_->[1] eq $base_expr;
-      $seen_ofs{$_->[2]}++;
-   }
-   my %info= (
-      vals => \@vals
-   );
-   if (defined $base_expr) {
-      # Find the min/max
-      my ($min, $max)= (min(keys %seen_ofs), max(keys %seen_ofs));
-      # Is it sequential?
-      my ($is_seq, $is_nearly_seq, $gap);
-      # don't iterate unless the range is reasonable
-      if (($max - $min) <= (1+$self->max_waste_factor) * @vals) {
-         $gap= 0;
-         for ($min .. $max) {
-            $gap++ unless $seen_ofs{$_};
-         }
-         $is_seq= $gap == 0;
-         $is_nearly_seq= $gap <= ($self->max_waste_factor * ($max-$min+1));
+sub _analysis($self) {
+   $self->{_analysis} //= do {
+      my @vals= map +[ $_->[0], $self->_parse_value_expr($_->[1]) ], $self->values;
+      my $base_expr= $vals[0][1];
+      my %seen_ofs= ( $vals[0][2] => 1 );
+      for (@vals[1..$#vals]) {
+         # Can't be sequential unless they share a symbolic base expression
+         $base_expr= undef, last
+            unless $_->[1] eq $base_expr;
+         $seen_ofs{$_->[2]}++;
       }
-      $info{is_seq}= $is_seq;
-      $info{is_nearly_seq}= $is_nearly_seq;
-      $info{gap}= $gap;
-      $info{min}= $min;
-      $info{max}= $max;
-      $info{base_expr}= $base_expr;
+      my %info= (
+         vals => \@vals
+      );
+      if (defined $base_expr) {
+         # Find the min/max
+         my ($min, $max)= (min(keys %seen_ofs), max(keys %seen_ofs));
+         # Is it sequential?
+         my ($is_seq, $is_nearly_seq, $gap);
+         # don't iterate unless the range is reasonable
+         if (($max - $min - @vals) <= $self->max_waste_factor * @vals) {
+            $gap= 0;
+            for ($min .. $max) {
+               $gap++ unless $seen_ofs{$_};
+            }
+            $is_seq= $gap == 0;
+            $is_nearly_seq= $gap <= $self->max_waste_factor * ($max-$min+1-$gap);
+         }
+         $info{is_seq}= $is_seq;
+         $info{is_nearly_seq}= $is_nearly_seq;
+         $info{gap}= $gap;
+         $info{min}= $min;
+         $info{max}= $max;
+         $info{base_expr}= $base_expr;
+      }
+      \%info
+   };
+}
+
+sub _generate_declaration_macros($self, $options) {
+   my @vals= $self->values;
+   my $name_width= max map length($_->[0]), @vals;
+   my $prefix= $self->macro_prefix;
+   my $fmt= "#define $prefix%${name_width}s %s";
+   return map sprintf($fmt, $_->[0], $_->[1]), @vals;
+}
+
+sub _generate_enum_table($self, $options) {
+   my $prefix= $self->prefix;
+   my @names= map $prefix . $_->[0], $self->values;
+   my $name_width= max map length, @names;
+   my $indent= $self->indent;
+   my $fmt= qq:      { "%s",%*s %s },:;
+   my @code= (
+      "const struct { const char *name; const ".$self->value_type." value; }",
+      $indent . $self->value_table_var . " = {",
+      (map sprintf($fmt, $_, $name_width-length, '', $_), @names),
+      $indent."};"
+   );
+   substr($code[-2], -1, 1, ''); # remove trailing comma
+   return @code;
+}
+
+sub _generate_lookup_by_value_switch($self, $options) {
+   my @vals= $self->values;
+   my $name_width= max map length($_->[0]), @vals;
+   my $info= $self->_analysis;
+   my $val_variable= 'value';
+   my $prefix= $self->macro_prefix;
+   my $enum_table= $self->value_table_var;
+   # Generate a switch() table to look them up
+   my @code= "switch ($val_variable) {";
+   my $fmt=  "case $prefix%s:%*s return ${enum_table}[%d].name;";
+   for (0..$#vals) {
+      push @code, sprintf($fmt, $vals[$_][0], $name_width - length($vals[$_][0]), '', $_);
    }
-   return \%info;
+   push @code, 'default: return NULL;', '}';
+   return @code;
+}
+
+sub _generate_lookup_by_name_switch($self, $options) {
+   my @vals= $self->values;
+   my $info= $self->_analysis;
+   my $caseless= $options->{caseless};
+   my $prefixless= $options->{prefixless};
+   my $prefixlen= length($self->macro_prefix);
+   my $indent= $self->indent;
+   my $len_var= $options->{len_var} // 'len';
+   my $str_ptr= $options->{str_ptr} // 'str';
+   my $enum_table= $self->value_table_var;
+   my $strcmp= $caseless? "strcasecmp" : "strcmp";
+   my $idx_type= @vals <= 0x7F? 'int8_t'
+      : @vals <= 0x7FFF? 'int16_t'
+      : @vals <= 0x7FFFFFFF? 'int32_t'
+      : 'int64_t';
+   my @search_set;
+   for (0..$#vals) {
+      push @search_set, [ $self->macro_prefix . $vals[$_][0], $_ ];
+      push @search_set, [ $vals[$_][0], -$_ ] if $prefixless;
+   }
+   my %by_len;
+   for (@search_set) {
+      push @{ $by_len{length $_->[0]} }, $_;
+   }
+   my $longest= max(keys %by_len);
+   my @code= (
+      "$idx_type test_el= 0;",
+      ("char str_buf[$longest+1];")x!!$caseless,
+      "switch ($len_var) {",
+   );
+   # Generate one binary decision tree for each string length
+   for (sort { $a <=> $b } keys %by_len) {
+      my %pivot_pos;
+      my @split_expr= $self->_binary_split($by_len{$_}, $caseless, $caseless? 'str_buf' : $str_ptr, \%pivot_pos);
+      push @code,
+         "case $_:",
+         ($caseless? (
+            map "${indent}str_buf[$_]= tolower(${str_ptr}[$_]);",
+               sort { $a <=> $b } keys %pivot_pos
+         ) : ()),
+         (map "$indent$_", @split_expr),
+         "${indent}break;",
+   }
+   push @code,
+      "default:",
+      "${indent}return false;",
+      "}";
+   # If allowing prefixless match, some test_el will be negative, meaning to
+   # test str+prefixlen
+   if ($prefixless) {
+      push @code,
+         "if (test_el < 0) {",
+         "${indent}if ($strcmp($str_ptr, ${enum_table}[-test_el].name + $prefixlen) == 0) {",
+         "${indent}${indent}if (value_out) *value_out= ${enum_table}[-test_el].value;",
+         "${indent}${indent}return true;",
+         "${indent}}",
+         "${indent}return false;",
+         "}";
+   }
+   push @code,
+      "if ($strcmp($str_ptr, ${enum_table}[test_el].name) == 0) {",
+      "${indent}if (value_out) *value_out= ${enum_table}[test_el].value;",
+      "${indent}return true;",
+      "}",
+      "return false;";
+   @code;
+}
+
+sub _binary_split($self, $vals, $caseless, $str_var, $pivot_pos) {
+   # Stop at length 1
+   return qq{test_el= $vals->[0][1];}
+      if @$vals == 1;
+   # Find a character comparison that splits the list roughly in half.
+   my $goal= .5 * scalar @$vals;
+   # Test every possible character and keep track of the best.
+   my ($best_i, $best_ch, $best_less);
+   for (my $i= 0; $i < length $vals->[0][0]; ++$i) {
+      if (!$caseless) {
+         for my $ch (uniqstr map substr($_->[0], $i, 1), @$vals) {
+            my @less= grep substr($_->[0], $i, 1) lt $ch, @$vals;
+            ($best_i, $best_ch, $best_less)= ($i, $ch, \@less)
+               if !defined $best_i || abs($goal - @less) < abs($goal - @$best_less);
+         }
+      } else {
+         for my $ch (uniqstr map lc substr($_->[0], $i, 1), @$vals) {
+            my @less= grep +(lc(substr($_->[0], $i, 1)) lt $ch), @$vals;
+            ($best_i, $best_ch, $best_less)= ($i, $ch, \@less)
+               if !defined $best_i || abs($goal - @less) < abs($goal - @$best_less);
+         }
+      }
+   }
+   $pivot_pos->{$best_i}++; # inform caller of which chars were used
+   # Binary split the things less than the pivot character
+   my @less_src= $self->_binary_split($best_less, $caseless, $str_var, $pivot_pos);
+   # Binary split the things greater-or-equal to the pivot character
+   my %less= map +($_->[0] => 1), @$best_less;
+   my @ge_src= $self->_binary_split([ grep !$less{$_->[0]}, @$vals ], $caseless, $str_var, $pivot_pos);
+   my $indent= $self->indent;
+   return (
+      "if (${str_var}[$best_i] < '$best_ch') {",
+      (map $indent.$_, @less_src),
+      (@ge_src > 1
+         # combine "else { if"
+         ? ( '} else '.$ge_src[0], @ge_src[1..$#ge_src] )
+         # else { statement }
+         : ( '} else {', (map $indent.$_, @ge_src), '}' )
+      )
+   );
 }
 
 1;
