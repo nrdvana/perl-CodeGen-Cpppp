@@ -1,7 +1,7 @@
 package CodeGen::Cpppp::Enum;
 
 # VERSION
-# ABSTRACT: Base class for template classes created by compiling cpppp
+# ABSTRACT: Helper for enumerations and generating related utility functions
 
 use v5.20;
 use warnings;
@@ -22,23 +22,23 @@ use CodeGen::Cpppp::CParser;
   ##     OTHER_VAL  1<<10
   ##     NONE       -1
   ## ));
-  section PUBLIC;
+  ## section PUBLIC;
   
-  {{ $enum->generate_declaration }}
+  ${{ $enum->generate_declaration }}
   
   extern const char * myenum_name(int value);
   extern bool myenum_parse(const char *str, size_t len, int *value_out);
   
-  section PRIVATE;
+  ## section PRIVATE;
 
-  {{ $enum->generate_static_tables }}
+  ${{ $enum->generate_static_tables }}
 
   const char * myenum_name(int value) {
-    {{ $enum->generate_lookup_by_value }}
+    ${{ $enum->generate_lookup_by_value }}
   }
   
   bool myenum_parse(const char *str, size_t len, int *value_out) {
-    {{ $enum->generate_lookup_by_name }}
+    ${{ $enum->generate_lookup_by_name }}
   }
 
 =head1 DESCRIPTION
@@ -378,14 +378,14 @@ C<< enum Foo { ... } >>.
 =cut
 
 sub generate_declaration($self, %options) {
-   $self->_generate_declaration_macros(\%options);
+   return join "\n", $self->_generate_declaration_macros(\%options);
 }
 
 sub _generate_declaration_macros($self, $options) {
    my @vals= $self->values;
    my $name_width= max map length($_->[0]), @vals;
    my $prefix= $self->macro_prefix;
-   my $fmt= "#define $prefix%-${name_width}s %s\n";
+   my $fmt= "#define $prefix%-${name_width}s %s";
    return map sprintf($fmt, $_->[0], $_->[1]), @vals;
 }
 
@@ -401,7 +401,7 @@ values in alphabetical order.
 =cut
 
 sub generate_static_tables($self, %options) {
-   return _generate_enum_table($self, \%options);
+   return join "\n", _generate_enum_table($self, \%options);
 }
 
 sub _generate_enum_table($self, $options) {
@@ -412,12 +412,12 @@ sub _generate_enum_table($self, $options) {
    my $fmt= $indent.$indent.'{ "%s",%*s %s },';
    my @code= (
       "const struct { const char *name; const ".$self->type." value; }",
-      $indent . $self->value_table_var . " = {",
+      $indent . $self->value_table_var . "[] = {",
       (map sprintf($fmt, $_, $name_width-length, '', $_), @names),
       $indent . '};'
    );
    substr($code[-2], -1, 1, ''); # remove trailing comma
-   return map "$_\n", @code;
+   return @code;
 }
 
 =head2 generate_lookup_by_value
@@ -431,7 +431,7 @@ the implementation returns NULL if this value does not have a name.
 =cut
 
 sub generate_lookup_by_value($self, %options) {
-   $self->_generate_lookup_by_value_switch(\%options);
+   return join "\n", $self->_generate_lookup_by_value_switch(\%options);
 }
 
 sub _generate_lookup_by_value_switch($self, $options) {
@@ -448,7 +448,7 @@ sub _generate_lookup_by_value_switch($self, $options) {
       push @code, sprintf($fmt, $vals[$_][0], $name_width - length($vals[$_][0]), '', $_);
    }
    push @code, 'default: return NULL;', '}';
-   return map "$_\n", @code;
+   return @code;
 }
 
 =head2 generate_lookup_by_name
@@ -462,7 +462,7 @@ return true (if found) or false if not found.
 =cut
 
 sub generate_lookup_by_name($self, %options) {
-   $self->_generate_lookup_by_name_switch(\%options);
+   return join "\n", $self->_generate_lookup_by_name_switch(\%options);
 }
 
 sub _generate_lookup_by_name_switch($self, $options) {
@@ -530,7 +530,7 @@ sub _generate_lookup_by_name_switch($self, $options) {
       "${indent}return true;",
       "}",
       "return false;";
-   return map "$_\n", @code;
+   return @code;
 }
 
 sub _binary_split($self, $vals, $caseless, $str_var, $pivot_pos) {

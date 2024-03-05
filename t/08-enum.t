@@ -89,7 +89,7 @@ subtest generate_table => sub {
    );
    is( [ $e->_generate_enum_table({}) ],
       [ "const struct { const char *name; const int value; }",
-        "   thing_value_table = {",
+        "   thing_value_table[] = {",
         '      { "THING_A",  THING_A },',
         '      { "THING_B",  THING_B },',
         '      { "THING_C",  THING_C },',
