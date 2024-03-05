@@ -124,7 +124,7 @@ our %option_spec= (
    'call=s'                => sub { push @script, [ 'call_method', $_[1] ] },
    'eval=s'                => sub { push @script, [ 'do_eval', $_[1] ] },
    'out|section-out|o=s'   => sub { push @script, [ 'output', $_[1] ] },
-   '<>'                    => sub { push @script, [ 'process_tpl', $_[1] ] },
+   '<>'                    => sub { push @script, [ 'process_tpl', $_[0] ] },
    'help'                  => sub { pod2usage(1) },
    'version'               => sub { say CodeGen::Cpppp->VERSION; exit 0 },
 );
