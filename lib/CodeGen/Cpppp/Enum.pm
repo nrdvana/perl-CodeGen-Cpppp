@@ -13,29 +13,55 @@ use CodeGen::Cpppp::CParser;
 
 =head1 SYNOPSIS
 
+  ## my $enum= CodeGen::Cpppp::Enum->new(
+  ##   prefix => 'MYENUM_', type => 'int', values => q(
+  ##     VAL_1      1
+  ##     VAL_2
+  ##     ALT_VAL
+  ##     SOME_VAL
+  ##     OTHER_VAL  1<<10
+  ##     NONE       -1
+  ## ));
+  section PUBLIC;
+  
+  {{ $enum->generate_declaration }}
+  
+  extern const char * myenum_name(int value);
+  extern bool myenum_parse(const char *str, size_t len, int *value_out);
+  
+  section PRIVATE;
 
+  {{ $enum->generate_static_tables }}
+
+  const char * myenum_name(int value) {
+    {{ $enum->generate_lookup_by_value }}
+  }
+  
+  bool myenum_parse(const char *str, size_t len, int *value_out) {
+    {{ $enum->generate_lookup_by_name }}
+  }
 
 =head1 DESCRIPTION
 
 This utility module helps you generate C code for enumerations.
 
-First, you create an instance of this object and load it with a list of
-names (and optionally values).  These can come from a supplied list, or you
-can parse a header to find them.  This module supports multiple names with the
-same value, but not multiple values with the same name.
+First, you create an instance of this object and load it with a list of enum
+values.  These can come from a supplied list, or you can parse a header to find
+them.  This module supports multiple names with the same value, but not
+multiple values with the same name.
 
-Next, you can generate the definition of the enum as either #define macros or
+Next, you can generate the definition of the enum as either C<#define> macros or
 a C++ C<< enum { ... } >> syntax.
 
 This also can generate code that looks up the name by the value, or parses a
-name to get the value.  The output would generally look like:
+name to get the value.  The header would generally look like:
 
-  #define FOO_1 1
-  #define FOO_2 2
+  #define EXAMPLE_1 1
+  #define EXAMPLE_2 2
   
   // Returns true if found a match
-  extern bool foo_parse(const char *ch, const char *endp, int *enum_val_out);
-  extern const char *foo_name(int enum_val);
+  extern bool example_parse(const char *ch, int len, int *value_out);
+  extern const char *example_name(int enum_val);
 
 There are several implementations to choose from, and a sensible one will be
 chosen by default based on the patterns in your enum values.
@@ -65,7 +91,7 @@ String to be prefixed onto each name of the enum.  You may then optionally
 allow name lookups that match strings without the prefix as well as ones that
 include it.
 
-=head2 value_type
+=head2 type
 
 Defaults to 'int'.
 
@@ -113,9 +139,9 @@ sub symbol_prefix($self, @val) {
    $self->{symbol_prefix} // lc($self->prefix);
 }
 
-sub value_type($self, @val) {
-   if (@val) { $self->{value_type}= $val[0]; return $self; }
-   $self->{value_type} // 'int';
+sub type($self, @val) {
+   if (@val) { $self->{type}= $val[0]; return $self; }
+   $self->{type} // 'int';
 }
 
 sub values($self, @val) {
@@ -338,12 +364,40 @@ sub _analysis($self) {
    };
 }
 
+=head2 generate_declaration
+
+  @code_lines= $enum->generate_declaration(%options);
+
+Return either a list of C<< #define NAME ... >> or the lines of a C++ 
+C<< enum Foo { ... } >>.
+
+=cut
+
+sub generate_declaration($self, %options) {
+   $self->_generate_declaration_macros(\%options);
+}
+
 sub _generate_declaration_macros($self, $options) {
    my @vals= $self->values;
    my $name_width= max map length($_->[0]), @vals;
    my $prefix= $self->macro_prefix;
-   my $fmt= "#define $prefix%${name_width}s %s";
+   my $fmt= "#define $prefix%-${name_width}s %s\n";
    return map sprintf($fmt, $_->[0], $_->[1]), @vals;
+}
+
+=head2 generate_static_tables
+
+  @code_lines= $enum->generate_static_tables(%options);
+
+Return lines of code that declare the tables needed for the lookups.  This
+always includes a table in the same order as the declaration of the enum values,
+but may also include additional hash tables or lookup tables to represent the
+values in alphabetical order.
+
+=cut
+
+sub generate_static_tables($self, %options) {
+   return _generate_enum_table($self, \%options);
 }
 
 sub _generate_enum_table($self, $options) {
@@ -353,13 +407,27 @@ sub _generate_enum_table($self, $options) {
    my $indent= $self->indent;
    my $fmt= qq:      { "%s",%*s %s },:;
    my @code= (
-      "const struct { const char *name; const ".$self->value_type." value; }",
+      "const struct { const char *name; const ".$self->type." value; }",
       $indent . $self->value_table_var . " = {",
       (map sprintf($fmt, $_, $name_width-length, '', $_), @names),
       $indent."};"
    );
    substr($code[-2], -1, 1, ''); # remove trailing comma
-   return @code;
+   return map "$_\n", @code;
+}
+
+=head2 generate_lookup_by_value
+
+  @code_lines= $enum->generate_lookup_by_value(%options);
+
+Return lines of code that return a C<< const char * >> of the name associated 
+with a value.  The variable holding the value is named 'value' by default, and
+the implementation returns NULL if this value does not have a name.
+
+=cut
+
+sub generate_lookup_by_value($self, %options) {
+   $self->_generate_lookup_by_value_switch(\%options);
 }
 
 sub _generate_lookup_by_value_switch($self, $options) {
@@ -376,7 +444,21 @@ sub _generate_lookup_by_value_switch($self, $options) {
       push @code, sprintf($fmt, $vals[$_][0], $name_width - length($vals[$_][0]), '', $_);
    }
    push @code, 'default: return NULL;', '}';
-   return @code;
+   return map "$_\n", @code;
+}
+
+=head2 generate_lookup_by_name
+
+  @code_lines= $enum->generate_lookup_by_name(%options);
+
+Return lines of code that take a name in a variable C<str>, C<len> bytes long,
+and store the enum value for that name into a variable C<value_out> and then
+return true (if found) or false if not found.
+
+=cut
+
+sub generate_lookup_by_name($self, %options) {
+   $self->_generate_lookup_by_name_switch(\%options);
 }
 
 sub _generate_lookup_by_name_switch($self, $options) {
@@ -444,7 +526,7 @@ sub _generate_lookup_by_name_switch($self, $options) {
       "${indent}return true;",
       "}",
       "return false;";
-   @code;
+   return map "$_\n", @code;
 }
 
 sub _binary_split($self, $vals, $caseless, $str_var, $pivot_pos) {
