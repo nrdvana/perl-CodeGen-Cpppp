@@ -192,6 +192,10 @@ sub indent($self, @val) {
    $self->{indent} // '   ';
 }
 
+sub _current_indent {
+   $CodeGen::Cpppp::INDENT // shift->indent;
+}
+
 sub num_format($self, @val) {
    if (@val) {
       $self->{num_format}= $val[0];
@@ -404,13 +408,13 @@ sub _generate_enum_table($self, $options) {
    my $prefix= $self->prefix;
    my @names= map $prefix . $_->[0], $self->values;
    my $name_width= max map length, @names;
-   my $indent= $self->indent;
-   my $fmt= qq:      { "%s",%*s %s },:;
+   my $indent= $self->_current_indent;
+   my $fmt= $indent.$indent.'{ "%s",%*s %s },';
    my @code= (
       "const struct { const char *name; const ".$self->type." value; }",
       $indent . $self->value_table_var . " = {",
       (map sprintf($fmt, $_, $name_width-length, '', $_), @names),
-      $indent."};"
+      $indent . '};'
    );
    substr($code[-2], -1, 1, ''); # remove trailing comma
    return map "$_\n", @code;
@@ -467,7 +471,7 @@ sub _generate_lookup_by_name_switch($self, $options) {
    my $caseless= $options->{caseless};
    my $prefixless= $options->{prefixless};
    my $prefixlen= length($self->macro_prefix);
-   my $indent= $self->indent;
+   my $indent= $self->_current_indent;
    my $len_var= $options->{len_var} // 'len';
    my $str_ptr= $options->{str_ptr} // 'str';
    my $enum_table= $self->value_table_var;
@@ -558,7 +562,7 @@ sub _binary_split($self, $vals, $caseless, $str_var, $pivot_pos) {
    # Binary split the things greater-or-equal to the pivot character
    my %less= map +($_->[0] => 1), @$best_less;
    my @ge_src= $self->_binary_split([ grep !$less{$_->[0]}, @$vals ], $caseless, $str_var, $pivot_pos);
-   my $indent= $self->indent;
+   my $indent= $self->_current_indent;
    return (
       "if (${str_var}[$best_i] < '$best_ch') {",
       (map $indent.$_, @less_src),

@@ -240,12 +240,23 @@ that contains a newline.
 Whether to automatically insert newlines (and maybe indent) when substituting
 an array into a template, based on context.
 
+=head2 indent
+
+The per-block indent to use for generated code.  This can be set to either a
+number (of spaces) or a literal string to be appended for each level of indent.
+If undefined, the indent will be detected from the change in leading whitespace
+from the first observed '{' in your template.
+
+This setting does not re-format the existing indentation written in the
+template; you need a full code-formatting tool for that.
+
 =cut
 
 sub autocolumn        { $_[0]{autocolumn}       = $_[1]||0 if @_ > 1; $_[0]{autocolumn}        }
 sub autocomma         { $_[0]{autocomma}        = $_[1]||0 if @_ > 1; $_[0]{autocomma}         }
 sub autoindent        { $_[0]{autoindent}       = $_[1]||0 if @_ > 1; $_[0]{autoindent}        }
 sub autostatementline { $_[0]{autostatementline}= $_[1]||0 if @_ > 1; $_[0]{autostatementline} }
+sub indent            { $_[0]{indent}           = $_[1]    if @_ > 1; $_[0]{indent} }
 
 sub _parse_data($class) {
    $class = ref $class if ref $class;
@@ -294,6 +305,7 @@ sub new($class, @args) {
       (map +($_ => $parse->{$_}||0), qw(
          autoindent autocolumn convert_linecomment_to_c89
       )),
+      indent => $parse->{indent},
       output => CodeGen::Cpppp::Output->new,
       current_output_section => 'private',
       %attrs,
@@ -448,6 +460,17 @@ sub _render_code_block {
       elsif (defined $s->{eval_idx}) {
          my $fn= $expr_subs[$s->{eval_idx}]
             or die;
+         # Identify the indent settings at this point so that other modules can
+         # automatically generate matching code.
+         my ($last_char)= ($$out =~ /(\S) (\s*) \Z/x);
+         my $cur_line= substr($$out, rindex($$out, "\n")+1);
+         (my $indent_prefix= $cur_line) =~ s/\S/ /g;
+         local $CodeGen::Cpppp::CURRENT_INDENT_PREFIX= $indent_prefix;
+         local $CodeGen::Cpppp::INDENT= $self->indent if defined $self->indent;
+         # it is "inline" context if non-whitespace occurs on this line already
+         my $is_inline= !!($cur_line =~ /\S/);
+         local $CodeGen::Cpppp::CURRENT_IS_INLINE= $is_inline;
+
          # Avoid using $_ up to this point so that $_ pases through
          # from the surrounding code into the evals
          my @out= $fn->($self, $out);
@@ -455,15 +478,9 @@ sub _render_code_block {
          @out= @{$out[0]} if @out == 1 && ref $out[0] eq 'ARRAY';
          ref eq 'CODE' && ($_= $_->($self, $out)) for @out;
          @out= grep defined, @out;
-         # Now decide what to join them with.
+         # Now decide how to join this into the code template.
+         # If this interpolation does not occur at the beginning of the line,
          my $join_sep= $";
-         my $indent= '';
-         my ($last_char)= ($$out =~ /(\S) (\s*) \Z/x);
-         my $cur_line= substr($$out, rindex($$out, "\n")+1);
-         my $inline= $cur_line =~ /\S/;
-         if ($self->{autoindent}) {
-            ($indent= $cur_line) =~ s/\S/ /g;
-         }
          # Special handling if the user requested a list substitution
          if (ord $s->{eval} == ord '@') {
             $last_char= '' unless defined $last_char;
@@ -471,7 +488,7 @@ sub _render_code_block {
                && substr($text, $s->{pos}+$s->{len}, 1) eq ';'
             ) {
                @out= grep /\S/, @out; # remove items that are only whitespace
-               if (!$inline && substr($text, $s->{pos}+$s->{len}, 2) eq ";\n") {
+               if (!$is_inline && substr($text, $s->{pos}+$s->{len}, 2) eq ";\n") {
                   $join_sep= ";\n";
                   # If no elements, remove the whole line.
                   if (!@out) {
@@ -484,14 +501,14 @@ sub _render_code_block {
             }
             elsif ($self->{autocomma} && ($last_char eq ',' || $last_char eq '(' || $last_char eq '{')) {
                @out= grep /\S/, @out; # remove items that are only whitespace
-               $join_sep= $inline? ', ' : ",\n";
+               $join_sep= $is_inline? ', ' : ",\n";
                # If no items, or the first nonwhitespace character is a comma,
                # remove the previous comma
                if (!@out || $out[0] =~ /^\s*,/) {
                   $$out =~ s/,(\s*)\Z/$1/;
                }
             }
-            elsif ($self->{autoindent} && !$inline && $join_sep !~ /\n/) {
+            elsif ($self->{autoindent} && !$is_inline && $join_sep !~ /\n/) {
                $join_sep .= "\n";
             }
          }
@@ -500,8 +517,8 @@ sub _render_code_block {
             my $str= shift @out;
             $str .= $join_sep . $_ for @out;
             # Autoindent: if new text contains newline, add current indent to start of each line.
-            if ($self->{autoindent} && $indent) {
-               $str =~ s/\n/\n$indent/g;
+            if ($self->{autoindent} && length $indent_prefix) {
+               $str =~ s/\n/\n$indent_prefix/g;
             }
             $$out .= $str;
          }

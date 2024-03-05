@@ -12,6 +12,13 @@ use CodeGen::Cpppp::Output;
 our $VERSION= 0; # VERSION
 # ABSTRACT: The C Perl-Powered Pre-Processor
 
+# These can be inspected by code generators to find out the current
+# context the code is being inserted into.  They are localized by
+# the template engine.
+our $CURRENT_INDENT_PREFIX= '';
+our $CURRENT_IS_INLINE= 0;
+our $INDENT= '   ';
+
 =head1 RATIONALE
 
 I<It's very special, because, if you can see, the preprocessor, goes up, to
@@ -434,8 +441,46 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
    my $ct= delete $self->{cpppp_parse}{coltrack};
    _finish_coltrack($ct, $_) for grep looks_like_number($_), keys %$ct;
 
+   # Finish detecting indent, if not specified
+   if (!defined $self->{cpppp_parse}{indent}) {
+      $self->{cpppp_parse}{indent}
+         = $self->_guess_indent(delete $self->{cpppp_parse}{indent_seen} || []);
+   }
+
    $self->{cpppp_parse}{code}= $perl;
    delete $self->{cpppp_parse};
+}
+
+sub _guess_indent($self, $indent_seen) {
+   my %evidence;
+   my $prev;
+   for (@$indent_seen) {
+      if (!defined $prev || length($_) <= length($prev)) {
+         $evidence{/^\t+$/? "\t" : /\t/? 'mixed_tabs' : $_}++;
+      }
+      elsif (length($prev) < length($_)) {
+         if ($prev =~ /\t/ || $_ =~ /\t/) {
+            if ($prev =~ /^\t+$/ && $_ =~ /^\t+$/) {
+               $evidence{"\t"}++;
+            } else {
+               $evidence{mixed_tabs}++;
+            }
+         } else {
+            my $step= length($_) - length($prev);
+            if (0 == length($prev) % $step) {
+               $evidence{' 'x$step}++;
+            }
+         }
+      }
+      $prev= $_;
+   }
+   my $guess;
+   for (keys %evidence) {
+      $guess= $_ if !defined $guess
+         || $evidence{$_} > $evidence{$guess}
+         || ($evidence{$_} == $evidence{$guess} && $_ lt $guess);
+   }
+   return defined $guess && $guess eq 'mixed_tabs'? undef : $guess;
 }
 
 sub _transform_template_perl($self, $pl, $line) {
@@ -521,9 +566,16 @@ sub _parse_code_block($self, $text, $file=undef, $orig_line=undef) {
       $file= $2;
    }
    local our $line= $orig_line || 1;
-   local our $parse= $self->{cpppp_parse};
+   local our $parse= $self->{cpppp_parse} //= {};
    local our $start;
    local our @subst;
+   # Check if we can auto-detect the indent
+   unless (defined $parse->{indent}) {
+      # Find all total indents used in this code, but only count lines that
+      # were preceeded by ';' or '{' or ')' followed by lines starting with a
+      # word or variable substitution.
+      push @{$parse->{indent_seen}}, $1 while $text =~ /(?<=[;{)]\s{0,200})\n([ \t]+)[\w\$\@]/g;
+   }
    # Everything in coltrack that survived the last _parse_code_block call
    # ended on the final line of the template.  Set the line numbers to
    # continue into this template.
