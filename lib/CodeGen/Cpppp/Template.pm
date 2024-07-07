@@ -31,7 +31,7 @@ and postderef.
 
 =item C<:v0>
 
-Exports symbols C<PUBLIC>, C<PROTECTED>, C<PRIVATE>
+Exports symbols C<PUBLIC>, C<PROTECTED>, C<PRIVATE>, C<compile_cpppp>
 
 =back
 
@@ -44,6 +44,7 @@ package CodeGen::Cpppp::Template::Exports {
       PRIVATE    => 'private',
    };
    our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp format_commandline
+     format_timestamp
    );
    our %EXPORT_TAGS= (
       'v0' => [qw( PUBLIC PROTECTED PRIVATE compile_cpppp )],
@@ -89,6 +90,10 @@ package CodeGen::Cpppp::Template::Exports {
    sub format_commandline {
       return '' unless main->can('format_commandline');
       return main->format_commandline;
+   }
+   sub format_timestamp {
+      my @t= gmtime;
+      sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5]+1900, @t[4,3,2,1,0]
    }
 }
 
