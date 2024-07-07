@@ -4,6 +4,7 @@
 # ABSTRACT: Command line tool to process cpppp templates
 use v5.20;
 use warnings;
+use FindBin;
 use experimental 'signatures';
 use CodeGen::Cpppp;
 use autouse 'Pod::Usage' => 'pod2usage';
@@ -268,3 +269,10 @@ sub shellquote {
    $x =~ s/''$//;
    $x;
 }
+
+# Lets a template main::re_exec(@different_args)
+sub re_exec(@new_argv) {
+   exec($^X, "$FindBin::RealBin/$FindBin::RealScript", @new_argv)
+      or die "exec: $!";
+}
+
