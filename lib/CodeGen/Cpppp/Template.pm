@@ -250,6 +250,14 @@ from the first observed '{' in your template.
 This setting does not re-format the existing indentation written in the
 template; you need a full code-formatting tool for that.
 
+=head2 emit_POD
+
+By default, Plain Old Documentation (POD) notation found in the template is
+assumed to document the template itself, and will be removed from the generated
+output.  Set this to true to emit the POD as part of the output.  (but a better
+idea is to declare variables like C<< $head1= '=head1' >> and then use those
+to generate the output POD)
+
 =cut
 
 sub autocolumn        { $_[0]{autocolumn}       = $_[1]||0 if @_ > 1; $_[0]{autocolumn}        }
@@ -257,6 +265,7 @@ sub autocomma         { $_[0]{autocomma}        = $_[1]||0 if @_ > 1; $_[0]{auto
 sub autoindent        { $_[0]{autoindent}       = $_[1]||0 if @_ > 1; $_[0]{autoindent}        }
 sub autostatementline { $_[0]{autostatementline}= $_[1]||0 if @_ > 1; $_[0]{autostatementline} }
 sub indent            { $_[0]{indent}           = $_[1]    if @_ > 1; $_[0]{indent} }
+sub emit_POD          { $_[0]{emit_POD}         = $_[1]||0 if @_ > 1; $_[0]{emit_POD} }
 
 sub _parse_data($class) {
    $class = ref $class if ref $class;
@@ -404,6 +413,13 @@ template to methods of the object being created.
 
 sub define_template_method($self, $name, $code) {
    $self->{template_method}{$name}= $code;
+}
+
+sub _render_pod_block($self, $i) {
+   if ($self->emit_POD) {
+      $self->_finish_render;
+      $self->{output}->append($self->{current_output_section} => $self->_parse_data->{pod_blocks}[$i]);
+   }
 }
 
 sub _finish_render($self) {

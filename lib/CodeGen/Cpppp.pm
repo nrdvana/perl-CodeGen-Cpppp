@@ -396,7 +396,8 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       colmarker         => {},
       coltrack          => { },
    };
-   my ($perl, $block_group, $tpl_start_line, $cur_tpl)= ('', 1);
+   my ($perl, $perl_line, $block_group, $tpl_start_line, $cur_tpl, $pod_start, @pod)
+      = ('', 0, 1);
    my sub end_tpl {
       if (defined $cur_tpl && $cur_tpl =~ /\S/) {
          my $parsed= $self->_parse_code_block($cur_tpl, $filename, $tpl_start_line);
@@ -407,15 +408,35 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
       $cur_tpl= undef;
    };
    for (@lines) {
-      if (/^#!/) { # ignore #!
+      if (/^=(\w+)/) {
+         if (!defined $pod_start) {
+            $pod_start= $line;
+            if (defined $cur_tpl) {
+               # trim off any blank line that occurs right before the pod.
+               chomp $cur_tpl;
+               end_tpl();
+            }
+         }
+         push @pod, $_;
+         if (@pod > 1 && $1 eq 'cut') {
+            my $current_indent= $perl =~ /\n([ \t]*).*\n\Z/? $1 : '';
+            $current_indent .= '  ' if $perl =~ /\{ *\n\Z/;
+            $perl .= $self->_gen_perl_emit_pod_block(join('', @pod), $filename, $pod_start, $current_indent);
+            @pod= ();
+            $pod_start= undef;
+         }
+      }
+      elsif (defined $pod_start) {
+         push @pod, $_;
+      }
+      elsif (/^#!/) { # ignore #!
       }
       elsif (/^##/) { # full-line of perl code
-         if (defined $cur_tpl || !length $perl) {
-            end_tpl();
-            $perl .= qq{# line $line "$filename"\n};
-         }
+         end_tpl() if defined $cur_tpl;
+         $perl .= qq{# line $line "$filename"\n} unless $perl_line == $line;
          (my $pl= $_) =~ s/^##\s?//;
          $perl .= $self->_transform_template_perl($pl, $line);
+         $perl_line= $line+1;
       }
       elsif (/^(.*?) ## ?((?:if|unless|for|while|unless) .*)/) { # perl conditional suffix, half tpl/half perl
          my ($tpl, $pl)= ($1, $2);
@@ -426,6 +447,7 @@ sub parse_cpppp($self, $in, $filename=undef, $line=undef) {
          $perl =~ s/;\s*$//; # remove semicolon
          $pl .= ';' unless $pl =~ /;\s*$/; # re-add it if user didn't
          $perl .= qq{\n# line $line "$filename"\n    $pl\n};
+         $perl_line= $line + 1;
       }
       else { # default is to assume a line of template
          if (!defined $cur_tpl) {
@@ -546,6 +568,12 @@ sub _gen_perl_call_code_block($self, $parsed, $indent='') {
    }
    $code .= "\n$indent" if index($code, "\n") >= 0;
    $code . ");\n";
+}
+
+sub _gen_perl_emit_pod_block($self, $pod, $file, $line, $indent='') {
+   my $pod_blocks= $self->{cpppp_parse}{pod_blocks} ||= [];
+   push @$pod_blocks, { pod => $pod, file => $file, line => $line };
+   return $indent.'$self->_render_pod_block('.$#$pod_blocks.");\n";
 }
 
 sub _finish_coltrack($coltrack, $col) {
