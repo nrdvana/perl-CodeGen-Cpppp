@@ -8,7 +8,8 @@ use warnings;
 use Carp;
 use experimental 'signatures', 'lexical_subs', 'postderef';
 use Scalar::Util 'looks_like_number';
-use List::Util 'any', 'min', 'max', 'uniqstr';
+use List::Util 'any', 'min', 'max';
+BEGIN { *uniqstr= List::Util->can('uniqstr') // sub { my %seen; grep !$seen{$_}++, @_ } }
 use CodeGen::Cpppp::CParser;
 
 =head1 SYNOPSIS
