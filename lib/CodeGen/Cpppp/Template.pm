@@ -88,8 +88,8 @@ package CodeGen::Cpppp::Template::Exports {
          $pkg->cpppp_version, $parse->{code}, $filename, $line);
    }
    sub format_commandline {
-      return '' unless main->can('format_commandline');
-      return main->format_commandline;
+      require CodeGen::Cpppp::Platform;
+      CodeGen::Cpppp::Platform::format_commandline(@_);
    }
    sub format_timestamp {
       my @t= gmtime;
