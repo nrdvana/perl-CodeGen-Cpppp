@@ -75,12 +75,20 @@ Standard constructor.  Pass values for any of the non-readonly attributes below.
 
 =cut
 
-sub new($class, %attrs) {
+sub new {
+   # function may be called as a class method, or exported function
+   my $class= !ref $_[0] && $_[0]->isa(__PACKAGE__)? shift : __PACKAGE__;
+   # list of attributes, or hashref of attributes, or arrayref of values attribute
+   my %attrs= @_ != 1? @_
+      : ref $_[0] eq 'HASH'? %{$_[0]}
+      : ref $_[0] eq 'ARRAY'? ( values => $_[0] );
    my $self= bless {}, $class;
    # apply num_format first because it affects set_values
    $self->num_format(delete $attrs{num_format})
       if exists $attrs{num_format};
-   $self->$_($attrs{$_}) for keys %attrs;
+   $self->$_(delete $attrs{$_}) for keys %attrs;
+   carp 'Unknown attributes provided to Enum constructor: '.join(', ', keys %attrs)
+      if keys %attrs;
    return $self;
 }
 
@@ -91,6 +99,17 @@ sub new($class, %attrs) {
 String to be prefixed onto each name of the enum.  You may then optionally
 allow name lookups that match strings without the prefix as well as ones that
 include it.
+If you do not set this attribute, it defaults to L</longest_common_prefix>.
+
+=head2 longest_common_prefix
+
+Compares all the names in L</values>, splitting them on "_", looking for the
+longest prefix shared by all of them.  This either returns a string ending with
+"_", or an empty string.
+
+  enum([qw( A_B_1 A_B_2 A_B_4 )])->longest_common_prefix;  # "A_B_"
+  enum([qw( A_B_1 A_C_2       )])->longest_common_prefix;  # "A_"
+  enum([qw( A_B_1 B_C_2       )])->longest_common_prefix;  # ""
 
 =head2 type
 
@@ -127,7 +146,23 @@ populated.
 
 sub prefix($self, @val) {
    if (@val) { $self->{prefix}= $val[0]; return $self }
-   $self->{prefix} // ''
+   $self->{prefix} // $self->longest_common_prefix;
+}
+
+sub longest_common_prefix($self) {
+   my $prefix= '';
+   for (@{$self->{values} || []}) {
+      if (!defined $prefix) {
+         ($prefix)= ($_->[0] =~ /^(.*_|)/);
+      }
+      else {
+         while (substr($_->[0], 0, length $prefix) ne $prefix) {
+            ($prefix)= ($prefix =~ /^(.*_|)./);
+         }
+      }
+      last unless length $prefix;
+   };
+   return $prefix;
 }
 
 sub macro_prefix($self, @val) {
