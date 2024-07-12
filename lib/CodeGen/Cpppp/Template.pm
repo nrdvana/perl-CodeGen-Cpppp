@@ -45,8 +45,8 @@ package CodeGen::Cpppp::Template::Exports {
    };
    use autouse 'CodeGen::Cpppp::CSyntax' => qw( c_str c_str_escape );
 
-   our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp format_commandline
-     format_timestamp enum c_str c_str_escape
+   our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp create_template
+     format_commandline format_timestamp enum c_str c_str_escape
    );
    our %EXPORT_TAGS= (
       'v0' => [qw( PUBLIC PROTECTED PRIVATE compile_cpppp )],
@@ -83,11 +83,21 @@ package CodeGen::Cpppp::Template::Exports {
          unless defined $cpppp;
       Carp::croak("cpppp source cannot be empty")
          unless length $cpppp;
-
-      my $parse= CodeGen::Cpppp::Template::Parser->new->parse(\$cpppp, $filename, $line);
-      $pkg->_init_parse_data($parse);
-      $pkg->_build_BUILD_method(
-         $pkg->cpppp_version, $parse->{code}, $filename, $line);
+      $pkg->_define_template_body(\$cpppp, $filename, $line);
+   }
+   sub create_template {
+      my %attrs= @_ != 1? @_
+         : !ref $_[0]? ( source => $_[0] )
+         : ref $_[0] eq 'HASH'? %{$_[0]}
+         : croak "Expected attribute list, attribute hash, or string of cpppp source";
+      my ($pkg, $filename, $line)= caller;
+      my $cpppp= delete $attrs{source};
+      defined $cpppp or croak "Missing 'source' parameter";
+      $filename= delete $attrs{filename} if defined $attrs{filename};
+      $line=     delete $attrs{line}     if defined $attrs{line};
+      my $p= CodeGen::Cpppp::Template::Parser->new(%attrs);
+      $p->parse(\$cpppp, $filename, $line);
+      return $p->compile;
    }
    sub format_commandline {
       require CodeGen::Cpppp::Platform;
@@ -135,6 +145,14 @@ sub _setup_derived_package($class, $pkg, $cpppp_ver) {
    no strict 'refs';
    @{"${pkg}::ISA"}= ( $class ) unless @{"${pkg}::ISA"};
    ${"${pkg}::cpppp_version"}= $cpppp_ver;
+}
+
+sub _define_template_body($class, $source, $filename, $line) {
+   my $parse= CodeGen::Cpppp::Template::Parser->new->parse($source, $filename, $line);
+   $class->_init_parse_data($parse);
+   $class->_build_BUILD_method(
+      $class->cpppp_version, $parse->{code}, $filename, $line);
+   $class;
 }
 
 sub _init_parse_data($class, $parse_data) {
