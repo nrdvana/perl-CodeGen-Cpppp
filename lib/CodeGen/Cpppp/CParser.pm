@@ -7,6 +7,7 @@ use v5.20;
 use warnings;
 use Carp;
 use experimental 'signatures', 'postderef';
+use CodeGen::Cpppp::CSyntax '%keywords','%named_string_escape';
 
 sub new {
    my $class= shift;
@@ -74,26 +75,6 @@ sub CodeGen::Cpppp::CParser::Token::value   { $_[0][1] }
 sub CodeGen::Cpppp::CParser::Token::src_pos { $_[0][2] }
 sub CodeGen::Cpppp::CParser::Token::src_len { $_[0][3] }
 
-our %keywords= map +($_ => 1), qw( 
-   auto break case char const continue default do double else enum extern
-   float for goto if int long register return short signed sizeof static
-   struct switch typedef union unsigned void volatile while
-
-   inline _Bool _Complex _Imaginary
-
-   __FUNCTION__ __PRETTY_FUNCTION__ __alignof __alignof__ __asm
-   __asm__ __attribute __attribute__ __builtin_offsetof __builtin_va_arg
-   __complex __complex__ __const __extension__ __func__ __imag __imag__ 
-   __inline __inline__ __label__ __null __real __real__ 
-   __restrict __restrict__ __signed __signed__ __thread __typeof
-   __volatile __volatile__ 
-
-   restrict
-);
-our %named_escape= (
-   a => "\a", b => "\b", e => "\e", f => "\f",
-   n => "\n", r => "\r", t => "\t", v => "\x0B"
-);
 our %tokens_before_infix_minus= map +($_ => 1), (
    ']', ')', 'integer','real','ident',
 );
@@ -128,7 +109,7 @@ sub _get_tokens {
                |  \\x ([0-9A-Fa-f]+) (?{ $^R . chr(hex $1) })
                |  \\ ([0-9]{1,3})    (?{ $^R . chr(oct $1) })
                |  \\ \r?\n
-               |  \\ (.)             (?{ $^R . ($named_escape{$1} // $1) })
+               |  \\ (.)             (?{ $^R . ($named_string_escape{$1} // $1) })
                )*
             ( " | \Z )
             (?{ $_type= 'string'; $_value= $^R; $_error= q{Reached end of input looking for '"'} unless $2 })
@@ -138,7 +119,7 @@ sub _get_tokens {
                   ([^'\\])           (?{ $1 })
                |  \\x ([0-9A-Fa-f]+) (?{ chr(hex $1) })
                |  \\ ([0-9]{1,3})    (?{ chr(oct $1) })
-               |  \\ (.)             (?{ $named_escape{$1} // $1 })
+               |  \\ (.)             (?{ $named_string_escape{$1} // $1 })
                )
             ( '? )
             (?{ $_type= 'char'; $_value= $^R; $_error= q{Unterminated character constant} unless $2 })

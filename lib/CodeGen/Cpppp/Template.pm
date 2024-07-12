@@ -43,8 +43,10 @@ package CodeGen::Cpppp::Template::Exports {
       PROTECTED  => 'protected',
       PRIVATE    => 'private',
    };
+   use autouse 'CodeGen::Cpppp::CSyntax' => qw( c_str c_str_escape );
+
    our @EXPORT_OK= qw( PUBLIC PROTECTED PRIVATE compile_cpppp format_commandline
-     format_timestamp
+     format_timestamp enum c_str c_str_escape
    );
    our %EXPORT_TAGS= (
       'v0' => [qw( PUBLIC PROTECTED PRIVATE compile_cpppp )],
