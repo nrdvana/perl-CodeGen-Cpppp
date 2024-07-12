@@ -2,9 +2,9 @@
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use Test2WithExplain;
-use CodeGen::Cpppp;
+use CodeGen::Cpppp::Template;
 
-my $cpppp= CodeGen::Cpppp->new;
+my $parser= CodeGen::Cpppp::Template::Parser->new;
 
 my @tests= (
    {  name => "basic substitutions",
@@ -36,7 +36,7 @@ C
 );
 
 for (@tests) {
-   my $parsed= $cpppp->_parse_code_block($_->{code});
+   my $parsed= $parser->_parse_code_block($_->{code});
    like( $parsed, $_->{expect}, $_->{name} )
       or note explain($parsed);
 }

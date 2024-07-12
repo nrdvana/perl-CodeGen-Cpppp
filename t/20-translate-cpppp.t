@@ -2,9 +2,9 @@
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use Test2WithExplain;
-use CodeGen::Cpppp;
 
-my $cpppp= CodeGen::Cpppp->new;
+use CodeGen::Cpppp::Template;
+
 
 my @tests= (
    {  name => "just perl",
@@ -79,7 +79,7 @@ pl
 );
 
 for my $t (@tests) {
-   my $parse= $cpppp->parse_cpppp(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $parse= CodeGen::Cpppp::Template::Parser->new->parse(\$t->{code}, $t->{file}, $t->{line}+1);
    # remove leading whitespace, so that changes in formatting of the code don't break tests
    $parse->{code} =~ s/^\s+//mg;
    $t->{expect} =~ s/^\s+//mg;
