@@ -105,7 +105,7 @@ package CodeGen::Cpppp::Template::Exports {
    }
    sub format_timestamp {
       my @t= gmtime;
-      sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5]+1900, @t[4,3,2,1,0]
+      sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ", $t[5]+1900, $t[4]+1, @t[3,2,1,0]
    }
 }
 
