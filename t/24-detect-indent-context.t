@@ -2,7 +2,7 @@
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use Test2WithExplain;
-use CodeGen::Cpppp::Template;
+use CodeGen::Cpppp::TemplateBuilder;
 
 my @tests= (
    {  name => "twospace",
@@ -54,7 +54,7 @@ C
 );
 
 for my $t (@tests) {
-   my $parse= CodeGen::Cpppp::Template::Parser->new->parse(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $parse= CodeGen::Cpppp::TemplateBuilder->new->parse(\$t->{code}, $t->{file}, $t->{line}+1);
    is( $parse->{indent}, $t->{expect}, $t->{name} )
       or note explain($parse);
 }

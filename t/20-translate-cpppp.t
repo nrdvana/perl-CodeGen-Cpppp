@@ -3,7 +3,7 @@ use FindBin;
 use lib "$FindBin::RealBin/lib";
 use Test2WithExplain;
 
-use CodeGen::Cpppp::Template;
+use CodeGen::Cpppp::TemplateBuilder;
 
 
 my @tests= (
@@ -79,11 +79,11 @@ pl
 );
 
 for my $t (@tests) {
-   my $parse= CodeGen::Cpppp::Template::Parser->new->parse(\$t->{code}, $t->{file}, $t->{line}+1);
+   my $parse= CodeGen::Cpppp::TemplateBuilder->new->parse(\$t->{code}, $t->{file}, $t->{line}+1);
    # remove leading whitespace, so that changes in formatting of the code don't break tests
-   $parse->{code} =~ s/^\s+//mg;
+   (my $perl= $parse->cpppp_perl) =~ s/^\s+//mg;
    $t->{expect} =~ s/^\s+//mg;
-   is( $parse->{code}, $t->{expect}, $t->{name} )
+   is( $perl, $t->{expect}, $t->{name} )
       or note explain($parse);
 }
 

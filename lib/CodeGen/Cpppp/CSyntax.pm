@@ -6,9 +6,9 @@ package CodeGen::Cpppp::CSyntax;
 use v5.20;
 use warnings;
 use Carp;
+use Exporter 'import';
 use experimental 'signatures', 'postderef';
-use Exporter::Extensible -exporter_setup => 1;
-export qw( is_keyword c_str c_str_escape %keywords %named_string_escape );
+our @EXPORT_OK= qw( is_keyword c_str c_str_escape %keywords %named_string_escape );
 
 =head1 EXPORTS
 

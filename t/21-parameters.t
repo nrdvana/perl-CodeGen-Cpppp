@@ -57,10 +57,12 @@ for my $t (@tests) {
             like( $err, $t2->{error}, "exception text $t2->{name}" );
          } else {
             diag $err if defined $err && length $err;
-            ok( defined $tpl, "new template $t2->{name}" );
-            is( $tpl->output->get, $t2->{expect}, "output $t2->{name}" );
-            is( $tpl->x, $t2->{final}, "final value $t2->{name}" )
-               or note explain($tpl);
+            ok( defined $tpl, "template->new($t2->{name})" );
+            if (defined $tpl) {
+               is( $tpl->output->get, $t2->{expect}, "output $t2->{name}" );
+               is( $tpl->x, $t2->{final}, "final value $t2->{name}" )
+                  or note explain($tpl);
+            }
          }
       }
    };

@@ -7,6 +7,7 @@ use version;
 use Cwd 'abs_path';
 use Scalar::Util 'blessed', 'looks_like_number';
 use CodeGen::Cpppp::Template;
+use CodeGen::Cpppp::TemplateBuilder;
 use CodeGen::Cpppp::Output;
 
 our $VERSION= 0; # VERSION
@@ -15,9 +16,10 @@ our $VERSION= 0; # VERSION
 # These can be inspected by code generators to find out the current
 # context the code is being inserted into.  They are localized by
 # the template engine.
-our $CURRENT_INDENT_PREFIX= '';
-our $CURRENT_IS_INLINE= 0;
-our $INDENT= '   ';
+our $current_indent_prefix= '';
+our $current_is_inline= 0;
+our @template_stack;
+our $indent= '   ';
 
 =head1 RATIONALE
 
@@ -285,7 +287,8 @@ to this C<$cpppp> instance, and return the template object.
 =cut
 
 sub new_template($self, $class_or_filename, @params) {
-   my $class= $class_or_filename =~ /^CodeGen::Cpppp::/ && $class_or_filename->can('new')
+   $class_or_filename= "$class_or_filename";
+   my $class= $class_or_filename->isa('CodeGen::Cpppp::Template')
       ? $class_or_filename
       : $self->require_template($class_or_filename);
    my %params= (
@@ -315,11 +318,13 @@ malicious templates.  But you run the same risk any time you run someone's
 
 sub compile_cpppp {
    my $self= shift;
-   my $parser= CodeGen::Cpppp::Template::Parser->new(
+   my $builder= CodeGen::Cpppp::TemplateBuilder->new(
       autoindent => $self->autoindent,
       autocolumn => $self->autocolumn,
    );
-   $parser->compile(@_);
+   local $CodeGen::Cpppp::TemplateBuilder::DATA_CALLER_LEVEL=
+      $CodeGen::Cpppp::TemplateBuilder::DATA_CALLER_LEVEL+1;
+   $builder->compile(@_);
 }
 
 =head2 patch_file

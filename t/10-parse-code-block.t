@@ -2,9 +2,9 @@
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use Test2WithExplain;
-use CodeGen::Cpppp::Template;
+use CodeGen::Cpppp::TemplateBuilder;
 
-my $parser= CodeGen::Cpppp::Template::Parser->new;
+my $parser= CodeGen::Cpppp::TemplateBuilder->new;
 
 my @tests= (
    {  name => "basic substitutions",
